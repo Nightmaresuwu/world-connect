@@ -5,10 +5,11 @@ import {
     updateDoc,
     collection,
     query,
-    where,
     getDocs,
     Timestamp,
-    serverTimestamp
+    serverTimestamp,
+    onSnapshot,
+    writeBatch
 } from "firebase/firestore";
 import { db } from "./firebase";
 
@@ -43,6 +44,7 @@ export const getUserById = async (uid: string): Promise<UserData | null> => {
 // Create or update user
 export const upsertUser = async (userData: UserData): Promise<boolean> => {
     try {
+        console.log("Upserting user:", userData.email);
         const userRef = doc(db, "users", userData.uid);
         const userDoc = await getDoc(userRef);
 
@@ -51,6 +53,7 @@ export const upsertUser = async (userData: UserData): Promise<boolean> => {
             const { uid, createdAt, ...updateData } = userData;
             await updateDoc(userRef, {
                 ...updateData,
+                isOnline: true, // Always set as online when updated
                 lastActive: serverTimestamp()
             });
         } else {
@@ -59,8 +62,9 @@ export const upsertUser = async (userData: UserData): Promise<boolean> => {
                 ...userData,
                 createdAt: serverTimestamp(),
                 lastActive: serverTimestamp(),
-                isOnline: true // Set new users as online by default
+                isOnline: true // Always create as online
             });
+            console.log(`New user created: ${userData.email}`);
         }
 
         return true;
@@ -85,50 +89,10 @@ export const updateUserOnlineStatus = async (uid: string, isOnline: boolean): Pr
     }
 };
 
-// Get all online users with better debugging and handling
-export const getOnlineUsers = async (): Promise<UserData[]> => {
-    try {
-        console.log("Fetching online users");
-        const q = query(userCollection, where("isOnline", "==", true));
-        const querySnapshot = await getDocs(q);
-
-        const onlineUsers = querySnapshot.docs.map(doc => ({
-            uid: doc.id,
-            ...(doc.data() as Omit<UserData, "uid">)
-        }));
-
-        console.log(`Found ${onlineUsers.length} online users:`, onlineUsers.map(u => u.username || u.email));
-        return onlineUsers;
-    } catch (error) {
-        console.error("Error getting online users:", error);
-        return [];
-    }
-};
-
-// Force all users online (for testing)
-export const setAllUsersOnline = async (): Promise<boolean> => {
-    try {
-        const querySnapshot = await getDocs(userCollection);
-
-        const updatePromises = querySnapshot.docs.map(doc =>
-            updateDoc(doc.ref, {
-                isOnline: true,
-                lastActive: serverTimestamp()
-            })
-        );
-
-        await Promise.all(updatePromises);
-        console.log(`Set ${updatePromises.length} users online for testing`);
-        return true;
-    } catch (error) {
-        console.error("Error setting all users online:", error);
-        return false;
-    }
-};
-
-// Get all users (for debugging)
+// Get all users (both online and offline)
 export const getAllUsers = async (): Promise<UserData[]> => {
     try {
+        console.log("Fetching all users");
         const querySnapshot = await getDocs(userCollection);
 
         const users = querySnapshot.docs.map(doc => ({
@@ -136,13 +100,51 @@ export const getAllUsers = async (): Promise<UserData[]> => {
             ...(doc.data() as Omit<UserData, "uid">)
         }));
 
-        console.log(`Found ${users.length} total users:`, users.map(u => ({
-            username: u.username || u.email,
-            isOnline: u.isOnline
-        })));
+        console.log(`Found ${users.length} total users:`, users.map(u => u.username || u.email));
         return users;
     } catch (error) {
         console.error("Error getting all users:", error);
         return [];
     }
+};
+
+// Set all users online (for testing)
+export const setAllUsersOnline = async (): Promise<boolean> => {
+    try {
+        console.log("Setting all users as online");
+        const querySnapshot = await getDocs(userCollection);
+
+        // Use batch write for better performance
+        const batch = writeBatch(db);
+
+        querySnapshot.docs.forEach(doc => {
+            batch.update(doc.ref, {
+                isOnline: true,
+                lastActive: serverTimestamp()
+            });
+        });
+
+        await batch.commit();
+        console.log(`Set ${querySnapshot.docs.length} users online for testing`);
+        return true;
+    } catch (error) {
+        console.error("Error setting all users online:", error);
+        return false;
+    }
+};
+
+// Legacy function - now returns all users for better compatibility
+export const getOnlineUsers = async (): Promise<UserData[]> => {
+    return getAllUsers();
+};
+
+// Subscribe to user changes - for real-time monitoring if needed
+export const subscribeToUsers = (callback: (users: UserData[]) => void): () => void => {
+    return onSnapshot(userCollection, (snapshot) => {
+        const users = snapshot.docs.map(doc => ({
+            uid: doc.id,
+            ...(doc.data() as Omit<UserData, "uid">)
+        }));
+        callback(users);
+    });
 }; 
