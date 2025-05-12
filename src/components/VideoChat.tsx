@@ -35,6 +35,9 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
     const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [onlineUsers, setOnlineUsers] = useState<UserData[]>([]);
+    const [showOnlineUsers, setShowOnlineUsers] = useState(false);
+    const [refreshingUsers, setRefreshingUsers] = useState(false);
 
     const localVideoRef = useRef<HTMLVideoElement>(null);
     const remoteVideoRef = useRef<HTMLVideoElement>(null);
@@ -42,9 +45,10 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
     const localStreamRef = useRef<MediaStream | null>(null);
     const chatMessagesUnsubscribeRef = useRef<(() => void) | null>(null);
 
-    // Set user as online when the component mounts
+    // Set user as online when the component mounts and fetch online users
     useEffect(() => {
         updateUserOnlineStatus(user.uid, true);
+        refreshOnlineUsers();
 
         // Set user as offline when component unmounts
         return () => {
@@ -55,6 +59,29 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
             }
         };
     }, [user.uid]);
+
+    // Periodically refresh online users list
+    useEffect(() => {
+        const intervalId = setInterval(() => {
+            refreshOnlineUsers();
+        }, 10000); // Refresh every 10 seconds
+
+        return () => clearInterval(intervalId);
+    }, []);
+
+    const refreshOnlineUsers = async () => {
+        try {
+            setRefreshingUsers(true);
+            const users = await getOnlineUsers();
+            // Filter out current user
+            const filteredUsers = users.filter(u => u.uid !== user.uid);
+            setOnlineUsers(filteredUsers);
+            setRefreshingUsers(false);
+        } catch (error) {
+            console.error('Error getting online users:', error);
+            setRefreshingUsers(false);
+        }
+    };
 
     // Initialize WebRTC
     useEffect(() => {
@@ -108,7 +135,13 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
     }, [chatState, currentRoomId]);
 
     const startSearch = () => {
-        setChatState(ChatState.SEARCHING);
+        refreshOnlineUsers().then(() => {
+            if (onlineUsers.length === 0) {
+                setError("No online users found. Try again later or invite a friend to join.");
+                return;
+            }
+            setChatState(ChatState.SEARCHING);
+        });
     };
 
     const stopSearch = () => {
@@ -125,34 +158,63 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
     const searchForPartner = async () => {
         try {
             setLoading(true);
-            const onlineUsers = await getOnlineUsers();
 
-            // Filter out current user
-            const availableUsers = onlineUsers.filter(u => u.uid !== user.uid);
+            // Check if we have online users in our state first
+            if (onlineUsers.length === 0) {
+                // If not, try to refresh the list
+                await refreshOnlineUsers();
 
-            if (availableUsers.length > 0) {
-                // Select a random user
-                const randomIndex = Math.floor(Math.random() * availableUsers.length);
-                const randomUser = availableUsers[randomIndex];
-
-                // Create a room with the selected user
-                const roomId = await createRoom(user.uid, randomUser.uid);
-
-                if (roomId) {
-                    setCurrentRoomId(roomId);
-                    setPartnerProfile(randomUser);
-                    setChatState(ChatState.CONNECTED);
-                    initiatePeerConnection();
-                } else {
-                    throw new Error("Failed to create room");
+                // Check again after refresh
+                if (onlineUsers.length === 0) {
+                    throw new Error("No users are currently online. Invite a friend to join!");
                 }
+            }
+
+            // Select a random user
+            const randomIndex = Math.floor(Math.random() * onlineUsers.length);
+            const randomUser = onlineUsers[randomIndex];
+
+            // Create a room with the selected user
+            const roomId = await createRoom(user.uid, randomUser.uid);
+
+            if (roomId) {
+                setCurrentRoomId(roomId);
+                setPartnerProfile(randomUser);
+                setChatState(ChatState.CONNECTED);
+                initiatePeerConnection();
             } else {
-                // No other users available, continue searching
-                setTimeout(searchForPartner, 3000);
+                throw new Error("Failed to create room");
             }
         } catch (error) {
             console.error('Error searching for partner:', error);
-            setError('Failed to find a chat partner. Please try again.');
+            let errorMessage = error instanceof Error ? error.message : 'Failed to find a chat partner. Please try again.';
+            setError(errorMessage);
+            setChatState(ChatState.IDLE);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const connectWithUser = async (selectedUser: UserData) => {
+        try {
+            setLoading(true);
+            setChatState(ChatState.SEARCHING);
+
+            // Create a room with the selected user
+            const roomId = await createRoom(user.uid, selectedUser.uid);
+
+            if (roomId) {
+                setCurrentRoomId(roomId);
+                setPartnerProfile(selectedUser);
+                setChatState(ChatState.CONNECTED);
+                initiatePeerConnection();
+                setShowOnlineUsers(false);
+            } else {
+                throw new Error("Failed to create room with selected user");
+            }
+        } catch (error) {
+            console.error('Error connecting with user:', error);
+            setError('Failed to connect with selected user. Please try again.');
             setChatState(ChatState.IDLE);
         } finally {
             setLoading(false);
@@ -270,6 +332,70 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
         }
     };
 
+    // Component to show online users
+    const OnlineUsersList = () => {
+        if (onlineUsers.length === 0) {
+            return (
+                <div className="text-center py-8">
+                    <p className="text-gray-400">No other users are currently online.</p>
+                    <p className="text-gray-400 mt-2">Invite your friends to join!</p>
+                </div>
+            );
+        }
+
+        return (
+            <div className="py-4">
+                <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-xl font-semibold text-white">Online Users ({onlineUsers.length})</h3>
+                    <button
+                        onClick={refreshOnlineUsers}
+                        disabled={refreshingUsers}
+                        className="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 transition disabled:opacity-60"
+                    >
+                        {refreshingUsers ? 'Refreshing...' : 'Refresh'}
+                    </button>
+                </div>
+                <div className="space-y-2 max-h-60 overflow-y-auto pr-2">
+                    {onlineUsers.map(user => (
+                        <div key={user.uid} className="flex justify-between items-center p-3 bg-gray-700 rounded">
+                            <div className="flex items-center">
+                                {user.avatarUrl ? (
+                                    <img
+                                        src={user.avatarUrl}
+                                        alt={user.username || 'User'}
+                                        className="w-10 h-10 rounded-full mr-3 object-cover"
+                                        onError={(e) => {
+                                            const target = e.target as HTMLImageElement;
+                                            target.src = 'https://via.placeholder.com/40?text=User';
+                                        }}
+                                    />
+                                ) : (
+                                    <div className="w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center mr-3">
+                                        <span className="text-white font-medium">
+                                            {(user.username || 'U').charAt(0).toUpperCase()}
+                                        </span>
+                                    </div>
+                                )}
+                                <div>
+                                    <p className="font-medium text-white">{user.username || 'Anonymous'}</p>
+                                    {user.gender && (
+                                        <p className="text-xs text-gray-400">{user.gender}</p>
+                                    )}
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => connectWithUser(user)}
+                                className="px-3 py-1 bg-green-600 text-white text-sm rounded hover:bg-green-700 transition"
+                            >
+                                Connect
+                            </button>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        );
+    };
+
     return (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2">
@@ -298,15 +424,29 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
                         {/* Overlay for different states */}
                         {chatState === ChatState.IDLE && (
                             <div className="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-80">
-                                <div className="text-center p-6">
+                                <div className="text-center p-6 w-full max-w-md">
                                     <h3 className="text-2xl font-bold text-white mb-4">Ready to Connect?</h3>
-                                    <p className="text-gray-300 mb-6">Click the button below to start meeting new people!</p>
-                                    <button
-                                        onClick={startSearch}
-                                        className="px-6 py-3 bg-blue-600 text-white rounded-full text-lg hover:bg-blue-700 transition"
-                                    >
-                                        Start Video Chat
-                                    </button>
+                                    <p className="text-gray-300 mb-6">Click below to start meeting new people or see who's online!</p>
+                                    <div className="flex flex-col space-y-3 sm:flex-row sm:space-y-0 sm:space-x-3 justify-center">
+                                        <button
+                                            onClick={startSearch}
+                                            className="px-6 py-3 bg-blue-600 text-white rounded-full text-lg hover:bg-blue-700 transition"
+                                        >
+                                            Random Match
+                                        </button>
+                                        <button
+                                            onClick={() => setShowOnlineUsers(!showOnlineUsers)}
+                                            className="px-6 py-3 bg-green-600 text-white rounded-full text-lg hover:bg-green-700 transition"
+                                        >
+                                            {showOnlineUsers ? 'Hide Users' : 'Show Online Users'}
+                                        </button>
+                                    </div>
+
+                                    {showOnlineUsers && (
+                                        <div className="mt-6 bg-gray-800 p-4 rounded-lg max-h-80 overflow-y-auto text-left">
+                                            <OnlineUsersList />
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         )}
