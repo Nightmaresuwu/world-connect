@@ -1,60 +1,63 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Users collection rules
+    // Helper function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Helper function to check if user is requesting their own data
+    function isUserAuthenticated(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    // Helper function to check if user is an admin
+    function isAdmin() {
+      return isAuthenticated() && 
+             exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+    
+    // Helper function to check if user is a super admin
+    function isSuperAdmin() {
+      return isAuthenticated() && 
+             exists(/databases/$(database)/documents/admins/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.role == 'superadmin';
+    }
+    
+    // Users Collection Rules
     match /users/{userId} {
-      // Users can read any user profile
-      allow read: if request.auth != null;
-      
-      // Users can only write to their own profile
-      allow write: if request.auth != null && request.auth.uid == userId;
+      // Anyone can read user profiles, but only the user themselves or an admin can write
+      allow read: if isAuthenticated();
+      allow create: if isUserAuthenticated(userId);
+      allow update: if isUserAuthenticated(userId) || isAdmin();
+      allow delete: if isAdmin();
     }
     
-    // Rooms collection rules
+    // Admins Collection Rules
+    match /admins/{adminId} {
+      // Only admins can read the admin collection
+      // Only super admins can create/update/delete other admins
+      allow read: if isAdmin();
+      allow create, update, delete: if isSuperAdmin();
+    }
+    
+    // Rooms Collection Rules
     match /rooms/{roomId} {
-      // Users can read rooms they are part of
-      allow read: if request.auth != null && 
-        (resource.data.participant1Id == request.auth.uid || 
-         resource.data.participant2Id == request.auth.uid);
-      
-      // Users can create rooms if they are a participant
-      allow create: if request.auth != null && 
-        (request.resource.data.participant1Id == request.auth.uid || 
-         request.resource.data.participant2Id == request.auth.uid);
-      
-      // Users can update rooms they are part of
-      allow update: if request.auth != null && 
-        (resource.data.participant1Id == request.auth.uid || 
-         resource.data.participant2Id == request.auth.uid);
+      // Only authenticated users can read/write rooms
+      allow read, write: if isAuthenticated();
     }
     
-    // Chat messages collection rules
+    // Chat Messages Rules
     match /chatMessages/{messageId} {
-      // Function to check if user is a participant in the room
-      function isRoomParticipant(roomId) {
-        let room = get(/databases/$(database)/documents/rooms/$(roomId)).data;
-        return room.participant1Id == request.auth.uid || 
-               room.participant2Id == request.auth.uid;
-      }
-      
-      // Users can read messages in rooms they are part of
-      allow read: if request.auth != null && 
-        isRoomParticipant(resource.data.roomId);
-      
-      // Users can create messages in rooms they are part of
-      allow create: if request.auth != null && 
-        isRoomParticipant(request.resource.data.roomId) &&
-        request.resource.data.senderId == request.auth.uid;
+      // Only authenticated users can read/write messages
+      allow read, write: if isAuthenticated();
     }
     
-    // Reports collection rules
+    // Reports Collection Rules
     match /reports/{reportId} {
-      // Users can create reports if they are the reporter
-      allow create: if request.auth != null && 
-        request.resource.data.reporterId == request.auth.uid;
-        
-      // Only admins can read reports (implement admin check in a production app)
-      allow read: if false;
+      // Anyone can create reports, but only admins can read them
+      allow create: if isAuthenticated();
+      allow read, update, delete: if isAdmin();
     }
   }
 } 
