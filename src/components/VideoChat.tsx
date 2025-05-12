@@ -4,7 +4,9 @@ import {
     getUserById,
     updateUserOnlineStatus,
     getOnlineUsers,
-    UserData
+    UserData,
+    getAllUsers,
+    setAllUsersOnline
 } from '../lib/userService';
 import {
     createRoom,
@@ -36,8 +38,10 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [onlineUsers, setOnlineUsers] = useState<UserData[]>([]);
+    const [allUsers, setAllUsers] = useState<UserData[]>([]);
     const [showOnlineUsers, setShowOnlineUsers] = useState(false);
     const [refreshingUsers, setRefreshingUsers] = useState(false);
+    const [debugMode, setDebugMode] = useState(false);
 
     const localVideoRef = useRef<HTMLVideoElement>(null);
     const remoteVideoRef = useRef<HTMLVideoElement>(null);
@@ -47,11 +51,13 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
 
     // Set user as online when the component mounts and fetch online users
     useEffect(() => {
+        console.log("Setting user as online and refreshing user lists");
         updateUserOnlineStatus(user.uid, true);
-        refreshOnlineUsers();
+        refreshAllUserLists();
 
         // Set user as offline when component unmounts
         return () => {
+            console.log("Component unmounting, setting user as offline");
             updateUserOnlineStatus(user.uid, false);
             stopLocalStream();
             if (chatMessagesUnsubscribeRef.current) {
@@ -69,17 +75,49 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
         return () => clearInterval(intervalId);
     }, []);
 
+    const refreshAllUserLists = async () => {
+        await refreshOnlineUsers();
+        await fetchAllUsers();
+    };
+
     const refreshOnlineUsers = async () => {
         try {
             setRefreshingUsers(true);
             const users = await getOnlineUsers();
             // Filter out current user
             const filteredUsers = users.filter(u => u.uid !== user.uid);
+            console.log(`After filtering current user, found ${filteredUsers.length} other online users`);
             setOnlineUsers(filteredUsers);
-            setRefreshingUsers(false);
         } catch (error) {
             console.error('Error getting online users:', error);
+        } finally {
             setRefreshingUsers(false);
+        }
+    };
+
+    const fetchAllUsers = async () => {
+        try {
+            const users = await getAllUsers();
+            // Filter out current user
+            const filteredUsers = users.filter(u => u.uid !== user.uid);
+            setAllUsers(filteredUsers);
+        } catch (error) {
+            console.error('Error getting all users:', error);
+        }
+    };
+
+    const makeAllUsersOnline = async () => {
+        try {
+            setLoading(true);
+            await setAllUsersOnline();
+            await refreshAllUserLists();
+            setLoading(false);
+            setError("All users have been set as online for testing");
+            setTimeout(() => setError(null), 3000);
+        } catch (error) {
+            console.error('Error setting all users online:', error);
+            setError('Failed to set all users online');
+            setLoading(false);
         }
     };
 
@@ -135,9 +173,10 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
     }, [chatState, currentRoomId]);
 
     const startSearch = () => {
+        console.log("Starting search for partners");
         refreshOnlineUsers().then(() => {
             if (onlineUsers.length === 0) {
-                setError("No online users found. Try again later or invite a friend to join.");
+                setError("No online users found. Try clicking 'Debug Mode' to see all users and make them online for testing.");
                 return;
             }
             setChatState(ChatState.SEARCHING);
@@ -166,18 +205,22 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
 
                 // Check again after refresh
                 if (onlineUsers.length === 0) {
-                    throw new Error("No users are currently online. Invite a friend to join!");
+                    throw new Error("No users are currently online. Click 'Debug Mode' and then 'Make All Users Online' to continue testing.");
                 }
             }
+
+            console.log("Searching among online users:", onlineUsers);
 
             // Select a random user
             const randomIndex = Math.floor(Math.random() * onlineUsers.length);
             const randomUser = onlineUsers[randomIndex];
+            console.log("Selected random user:", randomUser.username || randomUser.email);
 
             // Create a room with the selected user
             const roomId = await createRoom(user.uid, randomUser.uid);
 
             if (roomId) {
+                console.log("Room created with ID:", roomId);
                 setCurrentRoomId(roomId);
                 setPartnerProfile(randomUser);
                 setChatState(ChatState.CONNECTED);
@@ -200,10 +243,13 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
             setLoading(true);
             setChatState(ChatState.SEARCHING);
 
+            console.log("Connecting with selected user:", selectedUser.username || selectedUser.email);
+
             // Create a room with the selected user
             const roomId = await createRoom(user.uid, selectedUser.uid);
 
             if (roomId) {
+                console.log("Room created with ID:", roomId);
                 setCurrentRoomId(roomId);
                 setPartnerProfile(selectedUser);
                 setChatState(ChatState.CONNECTED);
@@ -334,10 +380,12 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
 
     // Component to show online users
     const OnlineUsersList = () => {
-        if (onlineUsers.length === 0) {
+        const usersToDisplay = debugMode ? allUsers : onlineUsers;
+
+        if (usersToDisplay.length === 0) {
             return (
                 <div className="text-center py-8">
-                    <p className="text-gray-400">No other users are currently online.</p>
+                    <p className="text-gray-400">No other users are currently {debugMode ? 'registered' : 'online'}.</p>
                     <p className="text-gray-400 mt-2">Invite your friends to join!</p>
                 </div>
             );
@@ -346,9 +394,11 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
         return (
             <div className="py-4">
                 <div className="flex justify-between items-center mb-4">
-                    <h3 className="text-xl font-semibold text-white">Online Users ({onlineUsers.length})</h3>
+                    <h3 className="text-xl font-semibold text-white">
+                        {debugMode ? 'All Users' : 'Online Users'} ({usersToDisplay.length})
+                    </h3>
                     <button
-                        onClick={refreshOnlineUsers}
+                        onClick={debugMode ? fetchAllUsers : refreshOnlineUsers}
                         disabled={refreshingUsers}
                         className="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 transition disabled:opacity-60"
                     >
@@ -356,7 +406,7 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
                     </button>
                 </div>
                 <div className="space-y-2 max-h-60 overflow-y-auto pr-2">
-                    {onlineUsers.map(user => (
+                    {usersToDisplay.map(user => (
                         <div key={user.uid} className="flex justify-between items-center p-3 bg-gray-700 rounded">
                             <div className="flex items-center">
                                 {user.avatarUrl ? (
@@ -377,9 +427,14 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
                                     </div>
                                 )}
                                 <div>
-                                    <p className="font-medium text-white">{user.username || 'Anonymous'}</p>
+                                    <p className="font-medium text-white">{user.username || user.email || 'Anonymous'}</p>
                                     {user.gender && (
                                         <p className="text-xs text-gray-400">{user.gender}</p>
+                                    )}
+                                    {debugMode && (
+                                        <p className="text-xs text-gray-400">
+                                            Status: {user.isOnline ? 'Online' : 'Offline'}
+                                        </p>
                                     )}
                                 </div>
                             </div>
@@ -443,7 +498,25 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
                                     </div>
 
                                     {showOnlineUsers && (
-                                        <div className="mt-6 bg-gray-800 p-4 rounded-lg max-h-80 overflow-y-auto text-left">
+                                        <div className="mt-6 bg-gray-800 p-4 rounded-lg max-h-96 overflow-y-auto text-left">
+                                            <div className="flex justify-between mb-4">
+                                                <button
+                                                    onClick={() => setDebugMode(!debugMode)}
+                                                    className="px-3 py-1 bg-gray-600 text-white text-sm rounded hover:bg-gray-700 transition"
+                                                >
+                                                    {debugMode ? 'Normal Mode' : 'Debug Mode'}
+                                                </button>
+
+                                                {debugMode && (
+                                                    <button
+                                                        onClick={makeAllUsersOnline}
+                                                        disabled={loading}
+                                                        className="px-3 py-1 bg-yellow-600 text-white text-sm rounded hover:bg-yellow-700 transition disabled:opacity-60"
+                                                    >
+                                                        {loading ? 'Processing...' : 'Make All Users Online'}
+                                                    </button>
+                                                )}
+                                            </div>
                                             <OnlineUsersList />
                                         </div>
                                     )}
@@ -487,7 +560,7 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
                                 <div className="flex items-center">
                                     <div className="h-3 w-3 bg-green-500 rounded-full mr-2"></div>
                                     <span className="text-white font-medium">
-                                        Connected with: {partnerProfile.username || 'Anonymous'}
+                                        Connected with: {partnerProfile.username || partnerProfile.email || 'Anonymous'}
                                     </span>
                                 </div>
                             )}

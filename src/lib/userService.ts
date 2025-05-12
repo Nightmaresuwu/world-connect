@@ -7,7 +7,8 @@ import {
     query,
     where,
     getDocs,
-    Timestamp
+    Timestamp,
+    serverTimestamp
 } from "firebase/firestore";
 import { db } from "./firebase";
 
@@ -50,15 +51,15 @@ export const upsertUser = async (userData: UserData): Promise<boolean> => {
             const { uid, createdAt, ...updateData } = userData;
             await updateDoc(userRef, {
                 ...updateData,
-                lastActive: Timestamp.now()
+                lastActive: serverTimestamp()
             });
         } else {
             // Create new user
             await setDoc(userRef, {
                 ...userData,
-                createdAt: Timestamp.now(),
-                lastActive: Timestamp.now(),
-                isOnline: false
+                createdAt: serverTimestamp(),
+                lastActive: serverTimestamp(),
+                isOnline: true // Set new users as online by default
             });
         }
 
@@ -72,9 +73,10 @@ export const upsertUser = async (userData: UserData): Promise<boolean> => {
 // Update user online status
 export const updateUserOnlineStatus = async (uid: string, isOnline: boolean): Promise<boolean> => {
     try {
+        console.log(`Setting user ${uid} online status to: ${isOnline}`);
         await updateDoc(doc(db, "users", uid), {
             isOnline,
-            lastActive: Timestamp.now()
+            lastActive: serverTimestamp()
         });
         return true;
     } catch (error) {
@@ -83,18 +85,64 @@ export const updateUserOnlineStatus = async (uid: string, isOnline: boolean): Pr
     }
 };
 
-// Get all online users
+// Get all online users with better debugging and handling
 export const getOnlineUsers = async (): Promise<UserData[]> => {
     try {
+        console.log("Fetching online users");
         const q = query(userCollection, where("isOnline", "==", true));
         const querySnapshot = await getDocs(q);
 
-        return querySnapshot.docs.map(doc => ({
+        const onlineUsers = querySnapshot.docs.map(doc => ({
             uid: doc.id,
             ...(doc.data() as Omit<UserData, "uid">)
         }));
+
+        console.log(`Found ${onlineUsers.length} online users:`, onlineUsers.map(u => u.username || u.email));
+        return onlineUsers;
     } catch (error) {
         console.error("Error getting online users:", error);
+        return [];
+    }
+};
+
+// Force all users online (for testing)
+export const setAllUsersOnline = async (): Promise<boolean> => {
+    try {
+        const querySnapshot = await getDocs(userCollection);
+
+        const updatePromises = querySnapshot.docs.map(doc =>
+            updateDoc(doc.ref, {
+                isOnline: true,
+                lastActive: serverTimestamp()
+            })
+        );
+
+        await Promise.all(updatePromises);
+        console.log(`Set ${updatePromises.length} users online for testing`);
+        return true;
+    } catch (error) {
+        console.error("Error setting all users online:", error);
+        return false;
+    }
+};
+
+// Get all users (for debugging)
+export const getAllUsers = async (): Promise<UserData[]> => {
+    try {
+        const querySnapshot = await getDocs(userCollection);
+
+        const users = querySnapshot.docs.map(doc => ({
+            uid: doc.id,
+            ...(doc.data() as Omit<UserData, "uid">)
+        }));
+
+        console.log(`Found ${users.length} total users:`, users.map(u => ({
+            username: u.username || u.email,
+            isOnline: u.isOnline
+        })));
+        return users;
+    } catch (error) {
+        console.error("Error getting all users:", error);
         return [];
     }
 }; 
