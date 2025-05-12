@@ -1,0 +1,69 @@
+{
+    "indexes": [
+        {
+            "collectionGroup": "chatMessages",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "roomId",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "timestamp",
+                    "order": "ASCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "rooms",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "participant1Id",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "isActive",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "createdAt",
+                    "order": "DESCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "rooms",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "participant2Id",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "isActive",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "createdAt",
+                    "order": "DESCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "users",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "isOnline",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "lastActive",
+                    "order": "DESCENDING"
+                }
+            ]
+        }
+    ],
+    "fieldOverrides": []
+}
