@@ -34,11 +34,8 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
     const [partnerProfile, setPartnerProfile] = useState<UserData | null>(null);
     const [message, setMessage] = useState('');
     const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-    const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [availableUsers, setAvailableUsers] = useState<UserData[]>([]);
-    const [showUsersList, setShowUsersList] = useState(false);
-    const [refreshingUsers, setRefreshingUsers] = useState(false);
 
     const localVideoRef = useRef<HTMLVideoElement>(null);
     const remoteVideoRef = useRef<HTMLVideoElement>(null);
@@ -78,37 +75,6 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
         };
     }, [user.uid]);
 
-    // Manual refresh of users list
-    const refreshUsersList = async () => {
-        try {
-            setRefreshingUsers(true);
-            const users = await getAllUsers();
-            // Filter out current user
-            const filteredUsers = users.filter(u => u.uid !== user.uid);
-            console.log(`After manual refresh, found ${filteredUsers.length} other users`);
-            setAvailableUsers(filteredUsers);
-        } catch (error) {
-            console.error('Error getting users:', error);
-        } finally {
-            setRefreshingUsers(false);
-        }
-    };
-
-    const makeAllUsersOnline = async () => {
-        try {
-            setLoading(true);
-            await setAllUsersOnline();
-            await refreshUsersList();
-            setLoading(false);
-            setError("All users have been set as online for testing");
-            setTimeout(() => setError(null), 3000);
-        } catch (error) {
-            console.error('Error setting all users online:', error);
-            setError('Failed to set all users online');
-            setLoading(false);
-        }
-    };
-
     // Initialize WebRTC
     useEffect(() => {
         if (chatState === ChatState.IDLE) {
@@ -125,6 +91,7 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
                 localStreamRef.current = stream;
 
                 if (chatState === ChatState.SEARCHING) {
+                    // eslint-disable-next-line react-hooks/exhaustive-deps
                     searchForPartner();
                 }
             } catch (error) {
@@ -162,10 +129,6 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
 
     const startSearch = () => {
         console.log("Starting search for partners");
-        if (availableUsers.length === 0) {
-            setError("No other users found. Invite your friends to join the app!");
-            return;
-        }
         setChatState(ChatState.SEARCHING);
     };
 
@@ -182,16 +145,19 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
 
     const searchForPartner = async () => {
         try {
-            setLoading(true);
+            setError(null);
 
             // Check if we have users in our state
             if (availableUsers.length === 0) {
                 // Try to refresh the list
-                await refreshUsersList();
+                const users = await getAllUsers();
+                // Filter out current user
+                const filteredUsers = users.filter(u => u.uid !== user.uid);
+                setAvailableUsers(filteredUsers);
 
                 // Check again after refresh
-                if (availableUsers.length === 0) {
-                    throw new Error("No other users are registered. Invite your friends to join!");
+                if (filteredUsers.length === 0) {
+                    throw new Error("No other users are currently online. Try again later!");
                 }
             }
 
@@ -219,37 +185,6 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
             let errorMessage = error instanceof Error ? error.message : 'Failed to find a chat partner. Please try again.';
             setError(errorMessage);
             setChatState(ChatState.IDLE);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const connectWithUser = async (selectedUser: UserData) => {
-        try {
-            setLoading(true);
-            setChatState(ChatState.SEARCHING);
-
-            console.log("Connecting with selected user:", selectedUser.username || selectedUser.email);
-
-            // Create a room with the selected user
-            const roomId = await createRoom(user.uid, selectedUser.uid);
-
-            if (roomId) {
-                console.log("Room created with ID:", roomId);
-                setCurrentRoomId(roomId);
-                setPartnerProfile(selectedUser);
-                setChatState(ChatState.CONNECTED);
-                initiatePeerConnection();
-                setShowUsersList(false);
-            } else {
-                throw new Error("Failed to create room with selected user");
-            }
-        } catch (error) {
-            console.error('Error connecting with user:', error);
-            setError('Failed to connect with selected user. Please try again.');
-            setChatState(ChatState.IDLE);
-        } finally {
-            setLoading(false);
         }
     };
 
@@ -364,72 +299,6 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
         }
     };
 
-    // Component to show available users
-    const AvailableUsersList = () => {
-        if (availableUsers.length === 0) {
-            return (
-                <div className="text-center py-8">
-                    <p className="text-gray-400">No other users are registered.</p>
-                    <p className="text-gray-400 mt-2">Invite your friends to join!</p>
-                </div>
-            );
-        }
-
-        return (
-            <div className="py-4">
-                <div className="flex justify-between items-center mb-4">
-                    <h3 className="text-xl font-semibold text-white">
-                        Available Users ({availableUsers.length})
-                    </h3>
-                    <button
-                        onClick={refreshUsersList}
-                        disabled={refreshingUsers}
-                        className="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 transition disabled:opacity-60"
-                    >
-                        {refreshingUsers ? 'Refreshing...' : 'Refresh'}
-                    </button>
-                </div>
-                <div className="space-y-2 max-h-60 overflow-y-auto pr-2">
-                    {availableUsers.map(user => (
-                        <div key={user.uid} className="flex justify-between items-center p-3 bg-gray-700 rounded">
-                            <div className="flex items-center">
-                                {user.avatarUrl ? (
-                                    <img
-                                        src={user.avatarUrl}
-                                        alt={user.username || 'User'}
-                                        className="w-10 h-10 rounded-full mr-3 object-cover"
-                                        onError={(e) => {
-                                            const target = e.target as HTMLImageElement;
-                                            target.src = 'https://via.placeholder.com/40?text=User';
-                                        }}
-                                    />
-                                ) : (
-                                    <div className="w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center mr-3">
-                                        <span className="text-white font-medium">
-                                            {(user.username || 'U').charAt(0).toUpperCase()}
-                                        </span>
-                                    </div>
-                                )}
-                                <div>
-                                    <p className="font-medium text-white">{user.username || user.email || 'Anonymous'}</p>
-                                    {user.gender && (
-                                        <p className="text-xs text-gray-400">{user.gender}</p>
-                                    )}
-                                </div>
-                            </div>
-                            <button
-                                onClick={() => connectWithUser(user)}
-                                className="px-3 py-1 bg-green-600 text-white text-sm rounded hover:bg-green-700 transition"
-                            >
-                                Connect
-                            </button>
-                        </div>
-                    ))}
-                </div>
-            </div>
-        );
-    };
-
     return (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2">
@@ -460,43 +329,13 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
                             <div className="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-80">
                                 <div className="text-center p-6 w-full max-w-md">
                                     <h3 className="text-2xl font-bold text-white mb-4">Ready to Connect?</h3>
-                                    <p className="text-gray-300 mb-6">Click below to start meeting new people or see who's registered!</p>
-                                    <div className="flex flex-col space-y-3 sm:flex-row sm:space-y-0 sm:space-x-3 justify-center">
-                                        <button
-                                            onClick={startSearch}
-                                            className="px-6 py-3 bg-blue-600 text-white rounded-full text-lg hover:bg-blue-700 transition"
-                                        >
-                                            Random Match
-                                        </button>
-                                        <button
-                                            onClick={() => setShowUsersList(!showUsersList)}
-                                            className="px-6 py-3 bg-green-600 text-white rounded-full text-lg hover:bg-green-700 transition"
-                                        >
-                                            {showUsersList ? 'Hide Users' : 'Show Users'}
-                                        </button>
-                                    </div>
-
-                                    {showUsersList && (
-                                        <div className="mt-6 bg-gray-800 p-4 rounded-lg max-h-96 overflow-y-auto text-left">
-                                            <div className="flex justify-between mb-4">
-                                                <div className="text-sm text-gray-300">
-                                                    {availableUsers.length === 0 ? (
-                                                        <span>No other users found</span>
-                                                    ) : (
-                                                        <span>Click on a user to connect directly</span>
-                                                    )}
-                                                </div>
-                                                <button
-                                                    onClick={makeAllUsersOnline}
-                                                    disabled={loading}
-                                                    className="px-3 py-1 bg-yellow-600 text-white text-sm rounded hover:bg-yellow-700 transition disabled:opacity-60"
-                                                >
-                                                    {loading ? 'Processing...' : 'Refresh Users'}
-                                                </button>
-                                            </div>
-                                            <AvailableUsersList />
-                                        </div>
-                                    )}
+                                    <p className="text-gray-300 mb-6">Click "Start" to begin meeting new people!</p>
+                                    <button
+                                        onClick={startSearch}
+                                        className="px-6 py-3 bg-blue-600 text-white rounded-full text-lg hover:bg-blue-700 transition"
+                                    >
+                                        Start
+                                    </button>
                                 </div>
                             </div>
                         )}
@@ -562,7 +401,7 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
                                         onClick={stopSearch}
                                         className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition"
                                     >
-                                        End Chat
+                                        Stop
                                     </button>
                                 </>
                             )}
