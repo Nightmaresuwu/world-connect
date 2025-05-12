@@ -1,19 +1,29 @@
 import React, { useState } from 'react';
 import { createUserWithEmailAndPassword, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { auth } from '../lib/firebase';
-import { upsertUser } from '../lib/userService';
+import { upsertUser, getUserByUsername } from '../lib/userService';
 
 interface RegisterProps {
     onRegister?: () => void;
+    onRegisterSuccess?: (message: string) => void;
 }
 
-const Register: React.FC<RegisterProps> = ({ onRegister }) => {
+const Register: React.FC<RegisterProps> = ({ onRegister, onRegisterSuccess }) => {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
     const [username, setUsername] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
+
+    const handleRegistrationSuccess = (message: string) => {
+        if (onRegisterSuccess) {
+            onRegisterSuccess(message);
+        }
+        if (onRegister) {
+            onRegister();
+        }
+    };
 
     const handleEmailAuth = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -29,19 +39,38 @@ const Register: React.FC<RegisterProps> = ({ onRegister }) => {
             return;
         }
 
+        if (!username.trim()) {
+            setError('Username is required');
+            return;
+        }
+
+        // Check if username is already taken
         setLoading(true);
         try {
+            const existingUser = await getUserByUsername(username);
+            if (existingUser) {
+                setError('Username is already taken. Please choose another one.');
+                setLoading(false);
+                return;
+            }
+
             const credential = await createUserWithEmailAndPassword(auth, email, password);
 
             // Create user profile in Firestore
-            await upsertUser({
+            const result = await upsertUser({
                 uid: credential.user.uid,
                 email: credential.user.email || email,
-                username: username || email.split('@')[0],
+                username: username,
                 isOnline: true
             });
 
-            if (onRegister) onRegister();
+            if (!result) {
+                setError('Failed to create user profile. Please try again.');
+                return;
+            }
+
+            // Successfully registered
+            handleRegistrationSuccess(`Account created successfully! You can now sign in as ${username}.`);
         } catch (err: any) {
             setError(err.message);
         } finally {
@@ -55,16 +84,33 @@ const Register: React.FC<RegisterProps> = ({ onRegister }) => {
             const provider = new GoogleAuthProvider();
             const credential = await signInWithPopup(auth, provider);
 
+            // Generate a username if not available from Google
+            let proposedUsername = credential.user.displayName?.replace(/\s+/g, '_').toLowerCase() ||
+                credential.user.email?.split('@')[0] || '';
+
+            // Check if username is already taken
+            const existingUser = await getUserByUsername(proposedUsername);
+            if (existingUser) {
+                // Append a random number if username is taken
+                proposedUsername = `${proposedUsername}_${Math.floor(Math.random() * 10000)}`;
+            }
+
             // Create user profile in Firestore
-            await upsertUser({
+            const result = await upsertUser({
                 uid: credential.user.uid,
                 email: credential.user.email || '',
-                username: credential.user.displayName || credential.user.email?.split('@')[0] || '',
+                username: proposedUsername,
                 avatarUrl: credential.user.photoURL || undefined,
                 isOnline: true
             });
 
-            if (onRegister) onRegister();
+            if (!result) {
+                setError('Failed to create user profile. Please try again.');
+                return;
+            }
+
+            // Successfully registered with Google
+            handleRegistrationSuccess(`Account created successfully with Google! Your username is ${proposedUsername}.`);
         } catch (err: any) {
             setError(err.message);
         } finally {
@@ -77,8 +123,11 @@ const Register: React.FC<RegisterProps> = ({ onRegister }) => {
             <div>
                 <h1 className="text-center text-4xl font-extrabold text-white">World Connect</h1>
                 <h2 className="mt-6 text-center text-3xl font-bold text-blue-400">
-                    Create your account
+                    Create your user account
                 </h2>
+                <p className="mt-2 text-center text-sm text-gray-400">
+                    Note: This registration is for regular users only. Admins are created by Super Admins.
+                </p>
             </div>
 
             {error && (
@@ -96,8 +145,9 @@ const Register: React.FC<RegisterProps> = ({ onRegister }) => {
                             name="username"
                             type="text"
                             autoComplete="username"
+                            required
                             className="appearance-none rounded relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
-                            placeholder="Username (optional)"
+                            placeholder="Username"
                             value={username}
                             onChange={(e) => setUsername(e.target.value)}
                         />
@@ -134,7 +184,7 @@ const Register: React.FC<RegisterProps> = ({ onRegister }) => {
                         <label htmlFor="confirm-password" className="sr-only">Confirm Password</label>
                         <input
                             id="confirm-password"
-                            name="confirm-password"
+                            name="confirmPassword"
                             type="password"
                             autoComplete="new-password"
                             required
@@ -152,7 +202,7 @@ const Register: React.FC<RegisterProps> = ({ onRegister }) => {
                         disabled={loading}
                         className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
                     >
-                        {loading ? 'Creating Account...' : 'Create Account'}
+                        {loading ? 'Creating account...' : 'Sign Up'}
                     </button>
                 </div>
             </form>

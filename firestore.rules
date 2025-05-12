@@ -13,8 +13,7 @@ service cloud.firestore {
     
     // Helper function to check if user is an admin
     function isAdmin() {
-      return isAuthenticated() && 
-             exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+      return isAuthenticated() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
     }
     
     // Helper function to check if user is a super admin
@@ -39,6 +38,14 @@ service cloud.firestore {
       // Only super admins can create/update/delete other admins
       allow read: if isAdmin();
       allow create, update, delete: if isSuperAdmin();
+    }
+    
+    // Allow querying admins by username to support username login
+    // This is important for the username-based login feature
+    match /admins/{adminId} {
+      allow read: if isAuthenticated() && 
+                    (request.auth.uid == adminId || 
+                     get(/databases/$(database)/documents/admins/$(adminId)).data.email == request.auth.token.email);
     }
     
     // Rooms Collection Rules

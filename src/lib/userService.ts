@@ -9,7 +9,8 @@ import {
     Timestamp,
     serverTimestamp,
     onSnapshot,
-    writeBatch
+    writeBatch,
+    where
 } from "firebase/firestore";
 import { db } from "./firebase";
 
@@ -41,10 +42,65 @@ export const getUserById = async (uid: string): Promise<UserData | null> => {
     }
 };
 
+// Find user by username
+export const getUserByUsername = async (username: string): Promise<UserData | null> => {
+    try {
+        const q = query(userCollection, where("username", "==", username));
+        const querySnapshot = await getDocs(q);
+
+        if (!querySnapshot.empty) {
+            const userDoc = querySnapshot.docs[0];
+            return { uid: userDoc.id, ...(userDoc.data() as Omit<UserData, "uid">) };
+        }
+
+        return null;
+    } catch (error) {
+        console.error("Error finding user by username:", error);
+        return null;
+    }
+};
+
+// Find user by email or username
+export const findUserByCredentials = async (loginId: string): Promise<UserData | null> => {
+    try {
+        // Check if loginId looks like an email
+        const isEmail = loginId.includes('@');
+
+        let q;
+        if (isEmail) {
+            q = query(userCollection, where("email", "==", loginId.toLowerCase()));
+        } else {
+            q = query(userCollection, where("username", "==", loginId));
+        }
+
+        const querySnapshot = await getDocs(q);
+
+        if (!querySnapshot.empty) {
+            const userDoc = querySnapshot.docs[0];
+            return { uid: userDoc.id, ...(userDoc.data() as Omit<UserData, "uid">) };
+        }
+
+        return null;
+    } catch (error) {
+        console.error("Error finding user by credentials:", error);
+        return null;
+    }
+};
+
 // Create or update user
 export const upsertUser = async (userData: UserData): Promise<boolean> => {
     try {
         console.log("Upserting user:", userData.email);
+
+        // Ensure username is unique if provided
+        if (userData.username) {
+            const existingUser = await getUserByUsername(userData.username);
+            if (existingUser && existingUser.uid !== userData.uid) {
+                console.error("Username already taken");
+                return false;
+            }
+        }
+
         const userRef = doc(db, "users", userData.uid);
         const userDoc = await getDoc(userRef);
 
@@ -108,14 +164,11 @@ export const getAllUsers = async (): Promise<UserData[]> => {
     }
 };
 
-// Set all users online (for testing)
+// Set all users as online (for testing purposes)
 export const setAllUsersOnline = async (): Promise<boolean> => {
     try {
-        console.log("Setting all users as online");
-        const querySnapshot = await getDocs(userCollection);
-
-        // Use batch write for better performance
         const batch = writeBatch(db);
+        const querySnapshot = await getDocs(userCollection);
 
         querySnapshot.docs.forEach(doc => {
             batch.update(doc.ref, {
@@ -125,7 +178,7 @@ export const setAllUsersOnline = async (): Promise<boolean> => {
         });
 
         await batch.commit();
-        console.log(`Set ${querySnapshot.docs.length} users online for testing`);
+        console.log(`Set ${querySnapshot.size} users as online`);
         return true;
     } catch (error) {
         console.error("Error setting all users online:", error);

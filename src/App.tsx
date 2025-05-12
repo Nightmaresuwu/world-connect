@@ -18,6 +18,8 @@ const App: React.FC = () => {
   const [userProfile, setUserProfile] = useState<UserData | null>(null);
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [adminData, setAdminData] = useState<AdminData | null>(null);
+  const [adminMode, setAdminMode] = useState<boolean>(false);
+  const [registrationSuccess, setRegistrationSuccess] = useState<string>('');
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -30,9 +32,20 @@ const App: React.FC = () => {
         const profile = await getUserById(user.uid);
         setUserProfile(profile);
 
-        // Check if user is an admin
+        // Check if user is an admin - try with both email and username (if available)
         if (user.email) {
-          const adminResult = await checkIsAdmin(user.uid, user.email);
+          let adminResult: AdminData | null = null;
+
+          if (profile && profile.username) {
+            // Try with username first if available
+            adminResult = await checkIsAdmin(user.uid, profile.username);
+          }
+
+          // If not found with username, try with email
+          if (!adminResult && user.email) {
+            adminResult = await checkIsAdmin(user.uid, user.email);
+          }
+
           setIsAdmin(!!adminResult);
           setAdminData(adminResult);
           console.log('Admin check result:', adminResult);
@@ -53,6 +66,26 @@ const App: React.FC = () => {
     });
 
     return () => unsubscribe();
+  }, [page]);
+
+  // Reset adminMode when changing pages
+  useEffect(() => {
+    if (page === 'login') {
+      setAdminMode(false);
+    }
+  }, [page]);
+
+  // Handle registration success message
+  const handleRegistrationSuccess = (message: string) => {
+    setRegistrationSuccess(message);
+    setPage('login');
+  };
+
+  // Clear registration success message when leaving login page
+  useEffect(() => {
+    if (page !== 'login') {
+      setRegistrationSuccess('');
+    }
   }, [page]);
 
   if (loading) {
@@ -110,41 +143,54 @@ const App: React.FC = () => {
             </div>
           </nav>
 
-          <div className="container mx-auto py-8 px-4">
+          <div className="container mx-auto mt-8 px-4">
             {page === 'videoChat' && <VideoChat user={user} userProfile={userProfile} />}
             {page === 'profile' && <Profile user={user} />}
             {page === 'admin' && isAdmin && <AdminDashboard user={user} />}
           </div>
         </>
       ) : (
-        <div className="flex justify-center items-center min-h-screen">
-          <div className="w-full max-w-md">
-            {page === 'login' ? (
-              <>
-                <Login onLogin={() => setPage('videoChat')} />
-                <div className="text-center mt-4">
-                  <button
-                    onClick={() => setPage('register')}
-                    className="text-blue-400 hover:text-blue-300"
-                  >
-                    Don't have an account? Register
-                  </button>
-                </div>
-              </>
-            ) : (
-              <>
-                <Register onRegister={() => setPage('videoChat')} />
-                <div className="text-center mt-4">
+        <div className="flex items-center justify-center min-h-screen">
+          {page === 'login' ? (
+            <div>
+              <Login
+                onLogin={() => setPage('videoChat')}
+                onAdminModeChange={setAdminMode}
+                registrationMessage={registrationSuccess}
+              />
+              <div className="text-center mt-4">
+                {!adminMode && (
+                  <p className="text-gray-400">
+                    Don't have an account?{' '}
+                    <button
+                      onClick={() => setPage('register')}
+                      className="text-blue-400 hover:text-blue-300 font-medium"
+                    >
+                      Sign up here
+                    </button>
+                  </p>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div>
+              <Register
+                onRegister={() => setPage('login')}
+                onRegisterSuccess={handleRegistrationSuccess}
+              />
+              <div className="text-center mt-4">
+                <p className="text-gray-400">
+                  Already have an account?{' '}
                   <button
                     onClick={() => setPage('login')}
-                    className="text-blue-400 hover:text-blue-300"
+                    className="text-blue-400 hover:text-blue-300 font-medium"
                   >
-                    Already have an account? Login
+                    Sign in here
                   </button>
-                </div>
-              </>
-            )}
-          </div>
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
