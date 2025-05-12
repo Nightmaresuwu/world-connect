@@ -119,14 +119,13 @@ const Register: React.FC<RegisterProps> = ({ onRegister, onRegisterSuccess }) =>
     };
 
     return (
-        <div className="w-full max-w-md bg-gray-800 rounded-lg shadow-lg p-8">
+        <div className="w-full max-w-md bg-gray-800 rounded-b-lg shadow-lg p-8">
             <div>
-                <h1 className="text-center text-4xl font-extrabold text-white">World Connect</h1>
-                <h2 className="mt-6 text-center text-3xl font-bold text-blue-400">
+                <h2 className="text-center text-2xl font-bold text-blue-400 mb-4">
                     Create your user account
                 </h2>
-                <p className="mt-2 text-center text-sm text-gray-400">
-                    Note: This registration is for regular users only. Admins are created by Super Admins.
+                <p className="text-center text-sm text-gray-400 mb-4">
+                    Note: This registration is for regular users only.
                 </p>
             </div>
 
@@ -136,7 +135,7 @@ const Register: React.FC<RegisterProps> = ({ onRegister, onRegisterSuccess }) =>
                 </div>
             )}
 
-            <form className="mt-8 space-y-6" onSubmit={handleEmailAuth}>
+            <form className="space-y-6" onSubmit={handleEmailAuth}>
                 <div className="rounded-md space-y-3">
                     <div>
                         <label htmlFor="username" className="sr-only">Username</label>

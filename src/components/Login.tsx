@@ -111,10 +111,9 @@ const Login: React.FC<LoginProps> = ({ onLogin, onAdminModeChange, registrationM
     };
 
     return (
-        <div className="w-full max-w-md bg-gray-800 rounded-lg shadow-lg p-8">
+        <div className="w-full max-w-md bg-gray-800 rounded-b-lg shadow-lg p-8">
             <div>
-                <h1 className="text-center text-4xl font-extrabold text-white">World Connect</h1>
-                <h2 className="mt-6 text-center text-3xl font-bold text-blue-400">
+                <h2 className="text-center text-2xl font-bold text-blue-400 mb-4">
                     {isAdminMode ? 'Admin Login' : 'Sign in to your account'}
                 </h2>
             </div>
@@ -131,7 +130,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, onAdminModeChange, registrationM
                 </div>
             )}
 
-            <div className="mt-4 mb-6">
+            <div className="mb-6">
                 <div className="flex justify-center space-x-2">
                     <button
                         type="button"
@@ -154,7 +153,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, onAdminModeChange, registrationM
                 </div>
             </div>
 
-            <form className="mt-8 space-y-6" onSubmit={handleEmailAuth}>
+            <form className="space-y-6" onSubmit={handleEmailAuth}>
                 <div className="rounded-md -space-y-px">
                     <div>
                         <label htmlFor="login-id" className="sr-only">Email or Username</label>

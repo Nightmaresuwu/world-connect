@@ -150,47 +150,49 @@ const App: React.FC = () => {
           </div>
         </>
       ) : (
-        <div className="flex items-center justify-center min-h-screen">
-          {page === 'login' ? (
-            <div>
+        <div className="flex flex-col items-center justify-center min-h-screen">
+          <div className="w-full max-w-md mb-6">
+            <h1 className="text-center text-4xl font-extrabold text-white mb-2">World Connect</h1>
+
+            {/* Auth tabs */}
+            {!adminMode && (
+              <div className="flex bg-gray-800 rounded-t-lg overflow-hidden mb-0">
+                <button
+                  onClick={() => setPage('login')}
+                  className={`flex-1 py-3 font-medium text-center transition-colors ${page === 'login'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    }`}
+                >
+                  Sign In
+                </button>
+                <button
+                  onClick={() => setPage('register')}
+                  className={`flex-1 py-3 font-medium text-center transition-colors ${page === 'register'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    }`}
+                >
+                  Sign Up
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="w-full max-w-md">
+            {page === 'login' ? (
               <Login
                 onLogin={() => setPage('videoChat')}
                 onAdminModeChange={setAdminMode}
                 registrationMessage={registrationSuccess}
               />
-              <div className="text-center mt-4">
-                {!adminMode && (
-                  <p className="text-gray-400">
-                    Don't have an account?{' '}
-                    <button
-                      onClick={() => setPage('register')}
-                      className="text-blue-400 hover:text-blue-300 font-medium"
-                    >
-                      Sign up here
-                    </button>
-                  </p>
-                )}
-              </div>
-            </div>
-          ) : (
-            <div>
+            ) : (
               <Register
                 onRegister={() => setPage('login')}
                 onRegisterSuccess={handleRegistrationSuccess}
               />
-              <div className="text-center mt-4">
-                <p className="text-gray-400">
-                  Already have an account?{' '}
-                  <button
-                    onClick={() => setPage('login')}
-                    className="text-blue-400 hover:text-blue-300 font-medium"
-                  >
-                    Sign in here
-                  </button>
-                </p>
-              </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       )}
     </div>
