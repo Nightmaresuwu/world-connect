@@ -53,6 +53,8 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
     const [isLoading, setIsLoading] = useState(true);
     const [isChatting, setIsChatting] = useState(false);
     const [connected, setConnected] = useState(false);
+    const [partnerUid, setPartnerUid] = useState<string | null>(null);
+    const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
 
     const localVideoRef = useRef<HTMLVideoElement>(null);
     const remoteVideoRef = useRef<HTMLVideoElement>(null);
@@ -63,6 +65,7 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
     const roomUnsubscribeRef = useRef<(() => void) | null>(null);
     const iceCandidatesUnsubscribeRef = useRef<(() => void) | null>(null);
     const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
+    const unsubscribeRefs = useRef<(() => void)[]>([]);
 
     // Update the main useEffect that runs on component mount
     useEffect(() => {
@@ -509,6 +512,150 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
         }
     };
 
+    // Add the missing function to initialize peer connection if it doesn't exist
+    const initiatePeerConnection = async () => {
+        try {
+            closePeerConnection(); // Close any existing connection
+
+            console.log("Initializing new peer connection");
+            const configuration = {
+                iceServers: [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:stun1.l.google.com:19302' },
+                    {
+                        urls: 'turn:numb.viagenie.ca',
+                        username: 'webrtc@live.com',
+                        credential: 'muazkh'
+                    }
+                ]
+            };
+
+            const peerConnection = new RTCPeerConnection(configuration);
+            peerConnectionRef.current = peerConnection;
+
+            // Debugging connection state
+            peerConnection.oniceconnectionstatechange = () => {
+                console.log("ICE Connection State:", peerConnection.iceConnectionState);
+            };
+
+            peerConnection.onicegatheringstatechange = () => {
+                console.log("ICE Gathering State:", peerConnection.iceGatheringState);
+            };
+
+            peerConnection.onsignalingstatechange = () => {
+                console.log("Signaling State:", peerConnection.signalingState);
+            };
+
+            // Connection state change
+            peerConnection.onconnectionstatechange = () => {
+                console.log("Connection state changed:", peerConnection.connectionState);
+                if (peerConnection.connectionState === 'connected') {
+                    console.log("WebRTC connection established successfully!");
+                } else if (peerConnection.connectionState === 'disconnected' ||
+                    peerConnection.connectionState === 'failed') {
+                    setError("Connection lost. Please try again.");
+                }
+            };
+
+            // Handle incoming streams - THIS IS CRUCIAL
+            peerConnection.ontrack = (event) => {
+                console.log("Received remote track", event.streams[0]);
+                if (remoteVideoRef.current && event.streams && event.streams[0]) {
+                    console.log("Setting remote video stream");
+                    remoteVideoRef.current.srcObject = event.streams[0];
+
+                    // Ensure the video plays
+                    remoteVideoRef.current.onloadedmetadata = () => {
+                        console.log("Remote video metadata loaded, playing...");
+                        remoteVideoRef.current?.play().catch(err => {
+                            console.error("Error playing remote video:", err);
+                        });
+                    };
+                } else {
+                    console.error("Remote video ref or stream is null", {
+                        remoteVideoRef: remoteVideoRef.current,
+                        streams: event.streams
+                    });
+                }
+            };
+
+            // Handle ICE candidates
+            peerConnection.onicecandidate = async (event) => {
+                if (event.candidate && currentRoomId) {
+                    console.log("Generated ICE candidate", event.candidate);
+                    try {
+                        await addIceCandidate(currentRoomId, user.uid, event.candidate);
+                    } catch (err) {
+                        console.error("Error adding local ICE candidate:", err);
+                    }
+                }
+            };
+
+            // Add local stream tracks to peer connection
+            if (localStreamRef.current) {
+                console.log("Adding local tracks to peer connection");
+                localStreamRef.current.getTracks().forEach(track => {
+                    if (localStreamRef.current) {
+                        console.log("Adding track to peer connection:", track.kind);
+                        peerConnection.addTrack(track, localStreamRef.current);
+                    }
+                });
+            } else {
+                console.error("No local stream available");
+                throw new Error("Camera access is required for video chat");
+            }
+
+            return peerConnection;
+        } catch (error) {
+            console.error('Error setting up peer connection:', error);
+            setError('Failed to establish video connection. Please try again.');
+            return null;
+        }
+    };
+
+    // Add the close peer connection function if it doesn't exist
+    const closePeerConnection = () => {
+        if (peerConnectionRef.current) {
+            console.log("Closing existing peer connection");
+            peerConnectionRef.current.close();
+            peerConnectionRef.current = null;
+        }
+    };
+
+    // Add a function to end the chat session
+    const endChat = () => {
+        console.log("Ending chat session");
+
+        // Close WebRTC peer connection
+        closePeerConnection();
+
+        // Update room status if needed
+        if (currentRoomId) {
+            updateRoomStatus(currentRoomId, false)
+                .then(() => console.log("Room marked as inactive"))
+                .catch(err => console.error("Error updating room status:", err));
+        }
+
+        // Clear chat state
+        setCurrentRoomId(null);
+        setPartnerUid(null);
+        setPartnerProfile(null);
+        setChatMessages([]);
+        setIsSearching(false);
+        setConnected(false);
+        setIsChatting(false);
+
+        // Unsubscribe from all real-time listeners
+        if (unsubscribeRefs.current) {
+            unsubscribeRefs.current.forEach(unsubscribe => {
+                if (typeof unsubscribe === 'function') {
+                    unsubscribe();
+                }
+            });
+            unsubscribeRefs.current = [];
+        }
+    };
+
     return (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2">
@@ -564,7 +711,7 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
                         {chatState === ChatState.SEARCHING && (
                             <div className="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-80">
                                 <div className="text-center p-6">
-                                    <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-blue-500 mx-auto mb-4"></div>
+                                    <CircularProgress size={40} className="mb-4" />
                                     <h3 className="text-2xl font-bold text-white mb-2">Finding a partner...</h3>
                                     <p className="text-gray-300 mb-6">Please wait while we connect you with someone.</p>
                                     <button
