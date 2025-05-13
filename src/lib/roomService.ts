@@ -133,9 +133,10 @@ export const getActiveRoomsForUser = async (userId: string): Promise<Room[]> => 
     }
 };
 
-// WebRTC Signaling Functions
+// Improved WebRTC Signaling Functions
 export const addOfferToRoom = async (roomId: string, offer: RTCSessionDescriptionInit): Promise<boolean> => {
     try {
+        console.log("Adding offer to room:", roomId, offer);
         await updateDoc(doc(db, "rooms", roomId), { offer });
         return true;
     } catch (error) {
@@ -146,6 +147,7 @@ export const addOfferToRoom = async (roomId: string, offer: RTCSessionDescriptio
 
 export const addAnswerToRoom = async (roomId: string, answer: RTCSessionDescriptionInit): Promise<boolean> => {
     try {
+        console.log("Adding answer to room:", roomId, answer);
         await updateDoc(doc(db, "rooms", roomId), { answer });
         return true;
     } catch (error) {
@@ -160,6 +162,7 @@ export const addIceCandidate = async (
     candidate: RTCIceCandidateInit
 ): Promise<string | null> => {
     try {
+        console.log("Adding ICE candidate:", roomId, senderId, candidate);
         const candidateData: Omit<IceCandidate, 'id'> = {
             roomId,
             senderId,
@@ -290,5 +293,207 @@ export const subscribeToChatMessages = (
         }));
 
         callback(messages);
+    });
+};
+
+// Subscribe to offers for a room
+export const subscribeToOffers = (
+    roomId: string,
+    callback: (offer: RTCSessionDescriptionInit) => void
+) => {
+    console.log("Subscribing to offers for room:", roomId);
+    return onSnapshot(doc(db, "rooms", roomId), (snapshot) => {
+        if (snapshot.exists()) {
+            const roomData = snapshot.data() as Omit<Room, "id">;
+            if (roomData.offer) {
+                console.log("Received offer from snapshot:", roomData.offer);
+                callback(roomData.offer);
+            }
+        }
+    });
+};
+
+// Subscribe to answers for a room
+export const subscribeToAnswers = (
+    roomId: string,
+    callback: (answer: RTCSessionDescriptionInit) => void
+) => {
+    console.log("Subscribing to answers for room:", roomId);
+    return onSnapshot(doc(db, "rooms", roomId), (snapshot) => {
+        if (snapshot.exists()) {
+            const roomData = snapshot.data() as Omit<Room, "id">;
+            if (roomData.answer) {
+                console.log("Received answer from snapshot:", roomData.answer);
+                callback(roomData.answer);
+            }
+        }
+    });
+};
+
+// Subscribe to ICE candidates from a specific user
+export const subscribeToUserIceCandidates = (
+    roomId: string,
+    otherUserId: string,
+    callback: (candidate: RTCIceCandidateInit) => void
+) => {
+    console.log(`Subscribing to ICE candidates from user ${otherUserId} in room ${roomId}`);
+    const q = query(
+        iceCandidateCollection,
+        where("roomId", "==", roomId),
+        where("senderId", "==", otherUserId)
+    );
+
+    return onSnapshot(q, (snapshot) => {
+        snapshot.docChanges().forEach((change) => {
+            if (change.type === 'added') {
+                const candidateData = change.doc.data() as IceCandidate;
+                console.log("New ICE candidate received:", candidateData.candidate);
+                callback(candidateData.candidate);
+            }
+        });
+    });
+};
+
+// Find an existing room or create a new one
+export const findOrCreateRoom = async (userId: string): Promise<{ roomId: string; partnerId: string; isInitiator: boolean }> => {
+    try {
+        // First, look for an existing active room with only one participant
+        const q = query(
+            roomCollection,
+            where("isActive", "==", true),
+            where("participant2Id", "==", "")
+        );
+
+        const snapshot = await getDocs(q);
+
+        if (!snapshot.empty) {
+            // Found an existing room, join as participant2
+            const roomDoc = snapshot.docs[0];
+            const roomData = roomDoc.data() as Omit<Room, "id">;
+
+            // Make sure we're not joining our own room
+            if (roomData.participant1Id !== userId) {
+                await updateDoc(doc(db, "rooms", roomDoc.id), {
+                    participant2Id: userId
+                });
+
+                console.log("Joined existing room:", roomDoc.id);
+                return {
+                    roomId: roomDoc.id,
+                    partnerId: roomData.participant1Id,
+                    isInitiator: false
+                };
+            }
+        }
+
+        // No suitable room found, create a new one
+        const roomData = {
+            participant1Id: userId,
+            participant2Id: "",
+            isActive: true,
+            createdAt: Timestamp.now()
+        };
+
+        const roomRef = await addDoc(roomCollection, roomData);
+        console.log("Created new room:", roomRef.id);
+
+        return {
+            roomId: roomRef.id,
+            partnerId: "",
+            isInitiator: true
+        };
+    } catch (error) {
+        console.error("Error finding or creating room:", error);
+        throw new Error("Failed to find or create a room");
+    }
+};
+
+// Create a room with a specific user
+export const createRoomWithUser = async (
+    userId: string,
+    partnerId: string
+): Promise<{ roomId: string; partnerId: string; isInitiator: boolean }> => {
+    try {
+        // Check for existing active rooms between these users
+        const q1 = query(
+            roomCollection,
+            where("isActive", "==", true),
+            where("participant1Id", "==", userId),
+            where("participant2Id", "==", partnerId)
+        );
+
+        const q2 = query(
+            roomCollection,
+            where("isActive", "==", true),
+            where("participant1Id", "==", partnerId),
+            where("participant2Id", "==", userId)
+        );
+
+        const [snapshot1, snapshot2] = await Promise.all([getDocs(q1), getDocs(q2)]);
+
+        if (!snapshot1.empty) {
+            const roomDoc = snapshot1.docs[0];
+            console.log("Found existing room (as p1):", roomDoc.id);
+            return {
+                roomId: roomDoc.id,
+                partnerId,
+                isInitiator: true
+            };
+        }
+
+        if (!snapshot2.empty) {
+            const roomDoc = snapshot2.docs[0];
+            console.log("Found existing room (as p2):", roomDoc.id);
+            return {
+                roomId: roomDoc.id,
+                partnerId,
+                isInitiator: false
+            };
+        }
+
+        // Create a new room
+        const roomData = {
+            participant1Id: userId,
+            participant2Id: partnerId,
+            isActive: true,
+            createdAt: Timestamp.now()
+        };
+
+        const roomRef = await addDoc(roomCollection, roomData);
+        console.log("Created new room with partner:", roomRef.id);
+
+        return {
+            roomId: roomRef.id,
+            partnerId,
+            isInitiator: true
+        };
+    } catch (error) {
+        console.error("Error creating room with user:", error);
+        throw new Error("Failed to create a room with the selected user");
+    }
+};
+
+// Subscribe to messages in a room
+export const subscribeToRoomMessages = (
+    roomId: string,
+    callback: (message: ChatMessage) => void
+) => {
+    console.log("Subscribing to messages for room:", roomId);
+    const q = query(
+        chatMessageCollection,
+        where("roomId", "==", roomId),
+        orderBy("timestamp", "asc")
+    );
+
+    return onSnapshot(q, (snapshot) => {
+        snapshot.docChanges().forEach((change) => {
+            if (change.type === 'added') {
+                const messageData = {
+                    id: change.doc.id,
+                    ...(change.doc.data() as Omit<ChatMessage, "id">)
+                };
+                callback(messageData);
+            }
+        });
     });
 }; 

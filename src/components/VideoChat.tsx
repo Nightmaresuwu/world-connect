@@ -19,9 +19,16 @@ import {
     addIceCandidate,
     subscribeToRoom,
     subscribeToIceCandidates,
-    Room
+    Room,
+    subscribeToRoomMessages,
+    subscribeToOffers,
+    subscribeToAnswers,
+    subscribeToUserIceCandidates,
+    findOrCreateRoom,
+    createRoomWithUser
 } from '../lib/roomService';
 import { reportUser } from '../lib/reportService';
+import { CircularProgress } from '@mui/material';
 
 interface VideoChatProps {
     user: User;
@@ -43,6 +50,9 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
     const [error, setError] = useState<string | null>(null);
     const [availableUsers, setAvailableUsers] = useState<UserData[]>([]);
     const [isInitiator, setIsInitiator] = useState(false);
+    const [isLoading, setIsLoading] = useState(true);
+    const [isChatting, setIsChatting] = useState(false);
+    const [connected, setConnected] = useState(false);
 
     const localVideoRef = useRef<HTMLVideoElement>(null);
     const remoteVideoRef = useRef<HTMLVideoElement>(null);
@@ -52,45 +62,53 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
     const usersUnsubscribeRef = useRef<(() => void) | null>(null);
     const roomUnsubscribeRef = useRef<(() => void) | null>(null);
     const iceCandidatesUnsubscribeRef = useRef<(() => void) | null>(null);
+    const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
 
-    // Set user as online when the component mounts and fetch users
+    // Update the main useEffect that runs on component mount
     useEffect(() => {
-        console.log("Setting user as online and subscribing to user updates");
-        updateUserOnlineStatus(user.uid, true);
-
-        // Subscribe to real-time user updates
-        const unsubscribe = subscribeToUsers((users) => {
-            // Filter out current user
-            const filteredUsers = users.filter(u => u.uid !== user.uid);
-            console.log(`After filtering current user, found ${filteredUsers.length} other users`);
-            setAvailableUsers(filteredUsers);
-        });
-
-        usersUnsubscribeRef.current = unsubscribe;
-
-        // Set user as offline when component unmounts
-        return () => {
-            console.log("Component unmounting, setting user as offline");
-            updateUserOnlineStatus(user.uid, false);
-            stopLocalStream();
-
-            if (chatMessagesUnsubscribeRef.current) {
-                chatMessagesUnsubscribeRef.current();
-            }
-
-            if (usersUnsubscribeRef.current) {
-                usersUnsubscribeRef.current();
-            }
-
-            if (roomUnsubscribeRef.current) {
-                roomUnsubscribeRef.current();
-            }
-
-            if (iceCandidatesUnsubscribeRef.current) {
-                iceCandidatesUnsubscribeRef.current();
+        // Set user online status when component mounts
+        const setUserOnline = async () => {
+            if (user?.uid) {
+                await updateUserOnlineStatus(user.uid, true);
+                console.log("User set as online:", user.uid);
             }
         };
-    }, [user.uid]);
+
+        // Initialize component
+        const initialize = async () => {
+            await setUserOnline();
+            await initializeLocalVideo();
+            fetchAvailableUsers();
+        };
+
+        initialize();
+
+        // Set up subscription to users
+        const unsubUsers = subscribeToUsers((users) => {
+            const filteredUsers = users.filter(u => u.uid !== user?.uid);
+            setAvailableUsers(filteredUsers);
+            setIsLoading(false);
+        });
+
+        // Clean up on unmount
+        return () => {
+            console.log("Cleaning up VideoChat component");
+
+            // Close any active connections
+            endChat();
+
+            // Stop local stream tracks
+            if (localStreamRef.current) {
+                localStreamRef.current.getTracks().forEach(track => {
+                    track.stop();
+                });
+                localStreamRef.current = null;
+            }
+
+            // Unsubscribe from users
+            if (unsubUsers) unsubUsers();
+        };
+    }, [user]);
 
     // Initialize WebRTC
     useEffect(() => {
@@ -101,20 +119,30 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
 
         const initializeLocalVideo = async () => {
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-                if (localVideoRef.current) {
-                    localVideoRef.current.srcObject = stream;
-                }
+                console.log("Initializing local video stream");
+                const constraints = {
+                    audio: true,
+                    video: {
+                        width: { ideal: 640 },
+                        height: { ideal: 480 }
+                    }
+                };
+
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
                 localStreamRef.current = stream;
 
-                if (chatState === ChatState.SEARCHING) {
-                    // eslint-disable-next-line react-hooks/exhaustive-deps
-                    searchForPartner();
+                if (localVideoRef.current) {
+                    localVideoRef.current.srcObject = stream;
+                    console.log("Setting local video stream");
+                    await localVideoRef.current.play().catch(err => {
+                        console.error("Error playing local video:", err);
+                    });
                 }
+
+                console.log("Local video initialized successfully");
             } catch (error) {
                 console.error('Error accessing media devices:', error);
-                alert('Failed to access camera and microphone. Please check your permissions.');
-                setChatState(ChatState.IDLE);
+                setError('Camera or microphone access denied. Please check your permissions.');
             }
         };
 
@@ -217,139 +245,87 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
         }
     };
 
-    const startSearch = () => {
-        console.log("Starting search for partners");
-        setChatState(ChatState.SEARCHING);
-    };
-
-    const stopSearch = () => {
-        if (currentRoomId) {
-            updateRoomStatus(currentRoomId, false);
-        }
-        setChatState(ChatState.IDLE);
-        setCurrentRoomId(null);
-        setPartnerProfile(null);
+    const startRandomChat = async () => {
+        setIsChatting(true);
+        setIsSearching(true);
         setChatMessages([]);
-        closePeerConnection();
-    };
+        setError(null);
 
-    const searchForPartner = async () => {
         try {
-            setError(null);
-
-            // Check if we have users in our state
-            if (availableUsers.length === 0) {
-                // Try to refresh the list
-                const users = await getAllUsers();
-                // Filter out current user
-                const filteredUsers = users.filter(u => u.uid !== user.uid);
-                setAvailableUsers(filteredUsers);
-
-                // Check again after refresh
-                if (filteredUsers.length === 0) {
-                    throw new Error("No other users are currently online. Try again later!");
-                }
-            }
-
-            console.log("Selecting from available users:", availableUsers.map(u => u.username || u.email));
-
-            // Select a random user
-            const randomIndex = Math.floor(Math.random() * availableUsers.length);
-            const randomUser = availableUsers[randomIndex];
-            console.log("Selected random user:", randomUser.username || randomUser.email);
-
-            // Create a room with the selected user
-            const roomId = await createRoom(user.uid, randomUser.uid);
-
-            if (roomId) {
-                console.log("Room created with ID:", roomId);
-                setCurrentRoomId(roomId);
-                setPartnerProfile(randomUser);
-                setChatState(ChatState.CONNECTED);
-
-                // Set as initiator since we created the room
-                setIsInitiator(true);
-
-                initiatePeerConnection();
-            } else {
-                throw new Error("Failed to create room");
-            }
-        } catch (error) {
-            console.error('Error searching for partner:', error);
-            let errorMessage = error instanceof Error ? error.message : 'Failed to find a chat partner. Please try again.';
-            setError(errorMessage);
-            setChatState(ChatState.IDLE);
-        }
-    };
-
-    const initiatePeerConnection = async () => {
-        try {
-            closePeerConnection(); // Close any existing connection
-
-            const configuration = {
-                iceServers: [
-                    { urls: 'stun:stun.l.google.com:19302' },
-                    { urls: 'stun:stun1.l.google.com:19302' }
-                ]
-            };
-
-            const peerConnection = new RTCPeerConnection(configuration);
-            peerConnectionRef.current = peerConnection;
-
-            // Add local stream tracks to peer connection
-            if (localStreamRef.current) {
-                localStreamRef.current.getTracks().forEach(track => {
-                    if (localStreamRef.current) {
-                        peerConnection.addTrack(track, localStreamRef.current);
-                    }
+            // Make sure we have access to camera and mic first
+            if (!localStreamRef.current) {
+                console.log("Getting local media stream");
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: true,
+                    audio: true
                 });
+
+                localStreamRef.current = stream;
+
+                if (localVideoRef.current) {
+                    localVideoRef.current.srcObject = stream;
+                    await localVideoRef.current.play().catch(err => {
+                        console.error("Error playing local video:", err);
+                    });
+                }
             }
 
-            // Handle incoming streams
-            peerConnection.ontrack = (event) => {
-                console.log("Received remote track", event.streams[0]);
-                if (remoteVideoRef.current && event.streams[0]) {
-                    remoteVideoRef.current.srcObject = event.streams[0];
-                }
-            };
+            // Search for partner
+            console.log("Searching for chat partner");
+            let roomData;
 
-            // Handle ICE candidates
-            peerConnection.onicecandidate = async (event) => {
-                if (event.candidate && currentRoomId) {
-                    console.log("Generated ICE candidate", event.candidate);
-                    await addIceCandidate(currentRoomId, user.uid, event.candidate);
-                }
-            };
-
-            // Connection state change
-            peerConnection.onconnectionstatechange = () => {
-                console.log("Connection state changed:", peerConnection.connectionState);
-                if (peerConnection.connectionState === 'disconnected' ||
-                    peerConnection.connectionState === 'failed') {
-                    setError("Connection lost. Please try again.");
-                }
-            };
-
-            // Only create and send offer if we are the initiator
-            if (isInitiator && currentRoomId) {
-                const offer = await peerConnection.createOffer();
-                await peerConnection.setLocalDescription(offer);
-
-                // Send offer to the other peer through Firestore
-                await addOfferToRoom(currentRoomId, offer);
-                console.log("Offer sent to room");
+            if (selectedUserId) {
+                console.log(`Connecting with selected user: ${selectedUserId}`);
+                roomData = await createRoomWithUser(user.uid, selectedUserId);
+                setIsInitiator(true);
+            } else {
+                console.log("Finding random partner");
+                roomData = await findOrCreateRoom(user.uid);
+                setIsInitiator(roomData.isInitiator);
             }
+
+            setCurrentRoomId(roomData.roomId);
+            setPartnerUid(roomData.partnerId);
+
+            console.log("Room created/joined:", roomData);
+            console.log("Is initiator:", roomData.isInitiator);
+
+            // Set up peer connection
+            await initiatePeerConnection();
+
+            // Subscribe to necessary signaling channels
+            const unsubscribeOffers = await subscribeToRoomOffers(roomData.roomId);
+            const unsubscribeAnswers = await subscribeToRoomAnswers(roomData.roomId);
+            const unsubscribePartnerCandidates = await subscribeToIceCandidates(
+                roomData.roomId,
+                roomData.partnerId
+            );
+
+            // Subscribe to room messages
+            const unsubscribeMessages = await subscribeToRoomMessages(
+                roomData.roomId,
+                (message) => {
+                    setChatMessages(prevMessages => [...prevMessages, message]);
+                }
+            );
+
+            // Store unsubscribe functions
+            unsubscribeRefs.current = [
+                unsubscribeOffers || (() => { }),
+                unsubscribeAnswers || (() => { }),
+                unsubscribePartnerCandidates || (() => { }),
+                unsubscribeMessages || (() => { })
+            ];
+
+            // Update UI state
+            setIsSearching(false);
+            setConnected(true);
 
         } catch (error) {
-            console.error('Error setting up peer connection:', error);
-            setError('Failed to establish video connection. Please try again.');
-        }
-    };
-
-    const closePeerConnection = () => {
-        if (peerConnectionRef.current) {
-            peerConnectionRef.current.close();
-            peerConnectionRef.current = null;
+            console.error("Error starting chat:", error);
+            setError('Failed to start chat. Please try again.');
+            setIsSearching(false);
+            closePeerConnection();
         }
     };
 
@@ -426,6 +402,113 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
         }
     };
 
+    // Handle room offers subscription
+    const subscribeToRoomOffers = async (roomId: string) => {
+        if (!roomId) return;
+
+        console.log("Subscribing to room offers for room:", roomId);
+
+        return subscribeToOffers(roomId, async (offer) => {
+            console.log("Received offer:", offer);
+
+            // Only process the offer if we are not the initiator
+            if (!isInitiator && peerConnectionRef.current) {
+                try {
+                    const peerConnection = peerConnectionRef.current;
+
+                    if (peerConnection.signalingState !== 'stable') {
+                        console.log("Resetting connection for new offer");
+                        await closePeerConnection();
+                        await initiatePeerConnection();
+                    }
+
+                    console.log("Setting remote description from offer");
+                    await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+
+                    console.log("Creating answer");
+                    const answer = await peerConnection.createAnswer();
+
+                    console.log("Setting local description with answer");
+                    await peerConnection.setLocalDescription(answer);
+
+                    // Wait briefly for ICE gathering
+                    await new Promise<void>(resolve => setTimeout(resolve, 1000));
+
+                    // Send answer to the room
+                    await addAnswerToRoom(roomId, peerConnection.localDescription as RTCSessionDescription);
+                    console.log("Answer sent to room");
+                } catch (error) {
+                    console.error("Error handling offer:", error);
+                    setError("Failed to process connection offer. Please try again.");
+                }
+            }
+        });
+    };
+
+    // Handle room answers subscription
+    const subscribeToRoomAnswers = async (roomId: string) => {
+        if (!roomId) return;
+
+        console.log("Subscribing to room answers for room:", roomId);
+
+        return subscribeToAnswers(roomId, async (answer) => {
+            console.log("Received answer:", answer);
+
+            // Only process the answer if we are the initiator
+            if (isInitiator && peerConnectionRef.current) {
+                try {
+                    console.log("Setting remote description from answer");
+                    await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(answer));
+                    console.log("Remote description set successfully");
+                } catch (error) {
+                    console.error("Error handling answer:", error);
+                    setError("Failed to process connection answer. Please try again.");
+                }
+            }
+        });
+    };
+
+    // Handle ICE candidates subscription
+    const subscribeToIceCandidates = async (roomId: string, otherUserId: string) => {
+        if (!roomId || !otherUserId) return;
+
+        console.log(`Subscribing to ICE candidates from user ${otherUserId} in room ${roomId}`);
+
+        return subscribeToUserIceCandidates(roomId, otherUserId, async (candidate) => {
+            console.log("Received ICE candidate:", candidate);
+
+            if (peerConnectionRef.current && peerConnectionRef.current.remoteDescription) {
+                try {
+                    await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+                    console.log("Added remote ICE candidate");
+                } catch (error) {
+                    console.error("Error adding remote ICE candidate:", error);
+                }
+            } else {
+                // Queue candidates if remote description isn't set yet
+                console.log("Queuing ICE candidate - remote description not set");
+                pendingCandidatesRef.current.push(candidate);
+            }
+        });
+    };
+
+    // Process any queued ICE candidates
+    const processPendingCandidates = async () => {
+        if (peerConnectionRef.current && peerConnectionRef.current.remoteDescription) {
+            while (pendingCandidatesRef.current.length > 0) {
+                const candidate = pendingCandidatesRef.current.shift();
+                if (candidate) {
+                    try {
+                        await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+                        console.log("Added queued ICE candidate");
+                    } catch (error) {
+                        console.error("Error adding queued ICE candidate:", error);
+                    }
+                }
+            }
+        }
+    };
+
     return (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2">
@@ -458,7 +541,7 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
                                     <h3 className="text-2xl font-bold text-white mb-4">Ready to Connect?</h3>
                                     <p className="text-gray-300 mb-6">Click "Start" to begin meeting new people!</p>
                                     <button
-                                        onClick={startSearch}
+                                        onClick={startRandomChat}
                                         className="px-6 py-3 bg-blue-600 text-white rounded-full text-lg hover:bg-blue-700 transition"
                                     >
                                         Start
@@ -485,7 +568,7 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
                                     <h3 className="text-2xl font-bold text-white mb-2">Finding a partner...</h3>
                                     <p className="text-gray-300 mb-6">Please wait while we connect you with someone.</p>
                                     <button
-                                        onClick={stopSearch}
+                                        onClick={handleNextPartner}
                                         className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition"
                                     >
                                         Cancel
@@ -536,7 +619,7 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
                                         Next
                                     </button>
                                     <button
-                                        onClick={stopSearch}
+                                        onClick={handleNextPartner}
                                         className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition"
                                     >
                                         Stop
