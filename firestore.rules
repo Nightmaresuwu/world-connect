@@ -60,6 +60,12 @@ service cloud.firestore {
       allow read, write: if isAuthenticated();
     }
     
+    // ICE Candidates Rules for WebRTC
+    match /iceCandidates/{candidateId} {
+      // Allow authenticated users to read/write ICE candidates
+      allow read, write: if isAuthenticated();
+    }
+    
     // Reports Collection Rules
     match /reports/{reportId} {
       // Anyone can create reports, but only admins can read them

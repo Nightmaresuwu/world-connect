@@ -13,7 +13,13 @@ import {
     sendChatMessage,
     getChatMessagesForRoom,
     subscribeToChatMessages,
-    ChatMessage
+    ChatMessage,
+    addOfferToRoom,
+    addAnswerToRoom,
+    addIceCandidate,
+    subscribeToRoom,
+    subscribeToIceCandidates,
+    Room
 } from '../lib/roomService';
 import { reportUser } from '../lib/reportService';
 
@@ -36,6 +42,7 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
     const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
     const [error, setError] = useState<string | null>(null);
     const [availableUsers, setAvailableUsers] = useState<UserData[]>([]);
+    const [isInitiator, setIsInitiator] = useState(false);
 
     const localVideoRef = useRef<HTMLVideoElement>(null);
     const remoteVideoRef = useRef<HTMLVideoElement>(null);
@@ -43,6 +50,8 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
     const localStreamRef = useRef<MediaStream | null>(null);
     const chatMessagesUnsubscribeRef = useRef<(() => void) | null>(null);
     const usersUnsubscribeRef = useRef<(() => void) | null>(null);
+    const roomUnsubscribeRef = useRef<(() => void) | null>(null);
+    const iceCandidatesUnsubscribeRef = useRef<(() => void) | null>(null);
 
     // Set user as online when the component mounts and fetch users
     useEffect(() => {
@@ -71,6 +80,14 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
 
             if (usersUnsubscribeRef.current) {
                 usersUnsubscribeRef.current();
+            }
+
+            if (roomUnsubscribeRef.current) {
+                roomUnsubscribeRef.current();
+            }
+
+            if (iceCandidatesUnsubscribeRef.current) {
+                iceCandidatesUnsubscribeRef.current();
             }
         };
     }, [user.uid]);
@@ -127,6 +144,79 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
         };
     }, [chatState, currentRoomId]);
 
+    // Subscribe to room changes for WebRTC signaling
+    useEffect(() => {
+        if (currentRoomId && chatState === ChatState.CONNECTED) {
+            // Subscribe to the room for SDP offer/answer exchange
+            const unsubscribeRoom = subscribeToRoom(currentRoomId, (room) => {
+                if (!room) return;
+
+                handleRoomSignaling(room);
+            });
+
+            // Subscribe to ICE candidates
+            const unsubscribeICE = subscribeToIceCandidates(currentRoomId, user.uid, (candidates) => {
+                if (!peerConnectionRef.current) return;
+
+                candidates.forEach(async (candidate) => {
+                    try {
+                        if (candidate.candidate && peerConnectionRef.current) {
+                            await peerConnectionRef.current.addIceCandidate(
+                                new RTCIceCandidate(candidate.candidate)
+                            );
+                            console.log("Added remote ICE candidate");
+                        }
+                    } catch (err) {
+                        console.error("Error adding received ice candidate", err);
+                    }
+                });
+            });
+
+            roomUnsubscribeRef.current = unsubscribeRoom;
+            iceCandidatesUnsubscribeRef.current = unsubscribeICE;
+        }
+
+        return () => {
+            if (roomUnsubscribeRef.current) {
+                roomUnsubscribeRef.current();
+            }
+            if (iceCandidatesUnsubscribeRef.current) {
+                iceCandidatesUnsubscribeRef.current();
+            }
+        };
+    }, [currentRoomId, chatState, user.uid]);
+
+    const handleRoomSignaling = async (room: Room) => {
+        if (!peerConnectionRef.current) return;
+
+        try {
+            // If we are the initiator and there's an answer, set the remote description
+            if (isInitiator && room.answer && !peerConnectionRef.current.currentRemoteDescription) {
+                console.log("Setting remote description with answer", room.answer);
+                await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(room.answer));
+            }
+
+            // If we are not the initiator and there's an offer, create and send an answer
+            if (!isInitiator && room.offer && !peerConnectionRef.current.currentRemoteDescription) {
+                console.log("Setting remote description with offer", room.offer);
+                await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(room.offer));
+
+                console.log("Creating answer");
+                const answer = await peerConnectionRef.current.createAnswer();
+                await peerConnectionRef.current.setLocalDescription(answer);
+
+                // Send the answer to the other peer
+                if (currentRoomId) {
+                    await addAnswerToRoom(currentRoomId, answer);
+                    console.log("Answer sent to room");
+                }
+            }
+        } catch (err) {
+            console.error("Error in handleRoomSignaling:", err);
+            setError("Error establishing video connection. Please try again.");
+        }
+    };
+
     const startSearch = () => {
         console.log("Starting search for partners");
         setChatState(ChatState.SEARCHING);
@@ -176,6 +266,10 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
                 setCurrentRoomId(roomId);
                 setPartnerProfile(randomUser);
                 setChatState(ChatState.CONNECTED);
+
+                // Set as initiator since we created the room
+                setIsInitiator(true);
+
                 initiatePeerConnection();
             } else {
                 throw new Error("Failed to create room");
@@ -190,6 +284,8 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
 
     const initiatePeerConnection = async () => {
         try {
+            closePeerConnection(); // Close any existing connection
+
             const configuration = {
                 iceServers: [
                     { urls: 'stun:stun.l.google.com:19302' },
@@ -211,23 +307,37 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
 
             // Handle incoming streams
             peerConnection.ontrack = (event) => {
+                console.log("Received remote track", event.streams[0]);
                 if (remoteVideoRef.current && event.streams[0]) {
                     remoteVideoRef.current.srcObject = event.streams[0];
                 }
             };
 
-            // Create offer
-            const offer = await peerConnection.createOffer();
-            await peerConnection.setLocalDescription(offer);
+            // Handle ICE candidates
+            peerConnection.onicecandidate = async (event) => {
+                if (event.candidate && currentRoomId) {
+                    console.log("Generated ICE candidate", event.candidate);
+                    await addIceCandidate(currentRoomId, user.uid, event.candidate);
+                }
+            };
 
-            // In a real implementation, you would send this offer to the partner through a signaling server
-            // For demo purposes, we're just simulating a connection
+            // Connection state change
+            peerConnection.onconnectionstatechange = () => {
+                console.log("Connection state changed:", peerConnection.connectionState);
+                if (peerConnection.connectionState === 'disconnected' ||
+                    peerConnection.connectionState === 'failed') {
+                    setError("Connection lost. Please try again.");
+                }
+            };
 
-            // Normally, you would receive an answer from the partner
-            // For demo purposes, we're creating a fake remote stream
-            const fakeRemoteStream = new MediaStream();
-            if (remoteVideoRef.current) {
-                remoteVideoRef.current.srcObject = fakeRemoteStream;
+            // Only create and send offer if we are the initiator
+            if (isInitiator && currentRoomId) {
+                const offer = await peerConnection.createOffer();
+                await peerConnection.setLocalDescription(offer);
+
+                // Send offer to the other peer through Firestore
+                await addOfferToRoom(currentRoomId, offer);
+                console.log("Offer sent to room");
             }
 
         } catch (error) {
@@ -299,6 +409,23 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
         }
     };
 
+    const refreshAvailableUsers = async () => {
+        try {
+            setError(null);
+            const users = await getAllUsers();
+            // Filter out current user
+            const filteredUsers = users.filter(u => u.uid !== user.uid);
+            setAvailableUsers(filteredUsers);
+
+            if (filteredUsers.length === 0) {
+                setError("No other users are currently online. Try again later!");
+            }
+        } catch (error) {
+            console.error('Error refreshing users:', error);
+            setError('Failed to refresh user list.');
+        }
+    };
+
     return (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2">
@@ -335,6 +462,17 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
                                         className="px-6 py-3 bg-blue-600 text-white rounded-full text-lg hover:bg-blue-700 transition"
                                     >
                                         Start
+                                    </button>
+                                    {availableUsers.length > 0 && (
+                                        <p className="mt-4 text-green-400">
+                                            {availableUsers.length} user{availableUsers.length !== 1 ? 's' : ''} online
+                                        </p>
+                                    )}
+                                    <button
+                                        onClick={refreshAvailableUsers}
+                                        className="mt-4 text-blue-400 hover:text-blue-300 underline"
+                                    >
+                                        Refresh user list
                                     </button>
                                 </div>
                             </div>

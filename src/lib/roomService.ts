@@ -9,7 +9,8 @@ import {
     where,
     orderBy,
     Timestamp,
-    onSnapshot
+    onSnapshot,
+    setDoc
 } from "firebase/firestore";
 import { db } from "./firebase";
 import { UserData } from "./userService";
@@ -22,6 +23,16 @@ export interface Room {
     participant2?: UserData;
     isActive: boolean;
     createdAt: Timestamp;
+    offer?: RTCSessionDescriptionInit;
+    answer?: RTCSessionDescriptionInit;
+}
+
+export interface IceCandidate {
+    id?: string;
+    roomId: string;
+    senderId: string;
+    candidate: RTCIceCandidateInit;
+    timestamp: Timestamp;
 }
 
 export interface ChatMessage {
@@ -35,6 +46,7 @@ export interface ChatMessage {
 
 export const roomCollection = collection(db, "rooms");
 export const chatMessageCollection = collection(db, "chatMessages");
+export const iceCandidateCollection = collection(db, "iceCandidates");
 
 // Create a new room
 export const createRoom = async (participant1Id: string, participant2Id: string): Promise<string | null> => {
@@ -119,6 +131,106 @@ export const getActiveRoomsForUser = async (userId: string): Promise<Room[]> => 
         console.error("Error getting active rooms:", error);
         return [];
     }
+};
+
+// WebRTC Signaling Functions
+export const addOfferToRoom = async (roomId: string, offer: RTCSessionDescriptionInit): Promise<boolean> => {
+    try {
+        await updateDoc(doc(db, "rooms", roomId), { offer });
+        return true;
+    } catch (error) {
+        console.error("Error adding offer to room:", error);
+        return false;
+    }
+};
+
+export const addAnswerToRoom = async (roomId: string, answer: RTCSessionDescriptionInit): Promise<boolean> => {
+    try {
+        await updateDoc(doc(db, "rooms", roomId), { answer });
+        return true;
+    } catch (error) {
+        console.error("Error adding answer to room:", error);
+        return false;
+    }
+};
+
+export const addIceCandidate = async (
+    roomId: string,
+    senderId: string,
+    candidate: RTCIceCandidateInit
+): Promise<string | null> => {
+    try {
+        const candidateData: Omit<IceCandidate, 'id'> = {
+            roomId,
+            senderId,
+            candidate,
+            timestamp: Timestamp.now()
+        };
+
+        const candidateRef = await addDoc(iceCandidateCollection, candidateData);
+        return candidateRef.id;
+    } catch (error) {
+        console.error("Error adding ICE candidate:", error);
+        return null;
+    }
+};
+
+export const getIceCandidatesForRoom = async (roomId: string, receiverId: string): Promise<IceCandidate[]> => {
+    try {
+        const q = query(
+            iceCandidateCollection,
+            where("roomId", "==", roomId),
+            where("senderId", "!=", receiverId),
+            orderBy("senderId"),
+            orderBy("timestamp")
+        );
+
+        const snapshot = await getDocs(q);
+        return snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...(doc.data() as Omit<IceCandidate, "id">)
+        }));
+    } catch (error) {
+        console.error("Error getting ICE candidates:", error);
+        return [];
+    }
+};
+
+export const subscribeToRoom = (
+    roomId: string,
+    callback: (room: Room | null) => void
+) => {
+    return onSnapshot(doc(db, "rooms", roomId), (snapshot) => {
+        if (snapshot.exists()) {
+            callback({
+                id: snapshot.id,
+                ...(snapshot.data() as Omit<Room, "id">)
+            });
+        } else {
+            callback(null);
+        }
+    });
+};
+
+export const subscribeToIceCandidates = (
+    roomId: string,
+    receiverId: string,
+    callback: (candidates: IceCandidate[]) => void
+) => {
+    const q = query(
+        iceCandidateCollection,
+        where("roomId", "==", roomId),
+        where("senderId", "!=", receiverId),
+    );
+
+    return onSnapshot(q, (snapshot) => {
+        const candidates = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...(doc.data() as Omit<IceCandidate, "id">)
+        }));
+
+        callback(candidates);
+    });
 };
 
 // Send a chat message
