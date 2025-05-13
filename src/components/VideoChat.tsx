@@ -55,6 +55,7 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
     const [connected, setConnected] = useState(false);
     const [partnerUid, setPartnerUid] = useState<string | null>(null);
     const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+    const [isSearching, setIsSearching] = useState(false);
 
     const localVideoRef = useRef<HTMLVideoElement>(null);
     const remoteVideoRef = useRef<HTMLVideoElement>(null);
@@ -66,6 +67,51 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
     const iceCandidatesUnsubscribeRef = useRef<(() => void) | null>(null);
     const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
     const unsubscribeRefs = useRef<(() => void)[]>([]);
+
+    // Add this as a function before the first useEffect
+    const initializeLocalVideo = async () => {
+        try {
+            console.log("Initializing local video stream");
+            const constraints = {
+                audio: true,
+                video: {
+                    width: { ideal: 640 },
+                    height: { ideal: 480 }
+                }
+            };
+
+            const stream = await navigator.mediaDevices.getUserMedia(constraints);
+            localStreamRef.current = stream;
+
+            if (localVideoRef.current) {
+                localVideoRef.current.srcObject = stream;
+                console.log("Setting local video stream");
+                await localVideoRef.current.play().catch(err => {
+                    console.error("Error playing local video:", err);
+                });
+            }
+
+            console.log("Local video initialized successfully");
+        } catch (error) {
+            console.error('Error accessing media devices:', error);
+            setError('Camera or microphone access denied. Please check your permissions.');
+        }
+    };
+
+    // Add this function to fetch available users
+    const fetchAvailableUsers = async () => {
+        try {
+            console.log("Fetching available users");
+            const users = await getAllUsers();
+            // Filter out current user
+            const filteredUsers = users.filter(u => u.uid !== user.uid);
+            setAvailableUsers(filteredUsers);
+            console.log(`Found ${filteredUsers.length} available users`);
+        } catch (error) {
+            console.error('Error fetching users:', error);
+            setError('Failed to fetch user list.');
+        }
+    };
 
     // Update the main useEffect that runs on component mount
     useEffect(() => {
@@ -113,41 +159,12 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
         };
     }, [user]);
 
-    // Initialize WebRTC
+    // Remove the duplicate initializeLocalVideo inside the useEffect
     useEffect(() => {
         if (chatState === ChatState.IDLE) {
             stopLocalStream();
             return;
         }
-
-        const initializeLocalVideo = async () => {
-            try {
-                console.log("Initializing local video stream");
-                const constraints = {
-                    audio: true,
-                    video: {
-                        width: { ideal: 640 },
-                        height: { ideal: 480 }
-                    }
-                };
-
-                const stream = await navigator.mediaDevices.getUserMedia(constraints);
-                localStreamRef.current = stream;
-
-                if (localVideoRef.current) {
-                    localVideoRef.current.srcObject = stream;
-                    console.log("Setting local video stream");
-                    await localVideoRef.current.play().catch(err => {
-                        console.error("Error playing local video:", err);
-                    });
-                }
-
-                console.log("Local video initialized successfully");
-            } catch (error) {
-                console.error('Error accessing media devices:', error);
-                setError('Camera or microphone access denied. Please check your permissions.');
-            }
-        };
 
         initializeLocalVideo();
     }, [chatState]);
@@ -186,22 +203,26 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
             });
 
             // Subscribe to ICE candidates
-            const unsubscribeICE = subscribeToIceCandidates(currentRoomId, user.uid, (candidates) => {
-                if (!peerConnectionRef.current) return;
+            const unsubscribeICE = subscribeToIceCandidates(
+                currentRoomId,
+                user.uid,
+                (candidates) => {
+                    if (!peerConnectionRef.current) return;
 
-                candidates.forEach(async (candidate) => {
-                    try {
-                        if (candidate.candidate && peerConnectionRef.current) {
-                            await peerConnectionRef.current.addIceCandidate(
-                                new RTCIceCandidate(candidate.candidate)
-                            );
-                            console.log("Added remote ICE candidate");
+                    candidates.forEach(async (candidate) => {
+                        try {
+                            if (candidate.candidate && peerConnectionRef.current) {
+                                await peerConnectionRef.current.addIceCandidate(
+                                    new RTCIceCandidate(candidate.candidate)
+                                );
+                                console.log("Added remote ICE candidate");
+                            }
+                        } catch (err) {
+                            console.error("Error adding received ice candidate", err);
                         }
-                    } catch (err) {
-                        console.error("Error adding received ice candidate", err);
-                    }
-                });
-            });
+                    });
+                }
+            );
 
             roomUnsubscribeRef.current = unsubscribeRoom;
             iceCandidatesUnsubscribeRef.current = unsubscribeICE;
@@ -299,7 +320,7 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
             // Subscribe to necessary signaling channels
             const unsubscribeOffers = await subscribeToRoomOffers(roomData.roomId);
             const unsubscribeAnswers = await subscribeToRoomAnswers(roomData.roomId);
-            const unsubscribePartnerCandidates = await subscribeToIceCandidates(
+            const unsubscribePartnerCandidates = await handleIceCandidates(
                 roomData.roomId,
                 roomData.partnerId
             );
@@ -471,8 +492,9 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
         });
     };
 
-    // Handle ICE candidates subscription
-    const subscribeToIceCandidates = async (roomId: string, otherUserId: string) => {
+    // Fix the naming conflict by renaming the local function
+    // Change this local function name to avoid conflict with imported function
+    const handleIceCandidates = async (roomId: string, otherUserId: string) => {
         if (!roomId || !otherUserId) return;
 
         console.log(`Subscribing to ICE candidates from user ${otherUserId} in room ${roomId}`);
