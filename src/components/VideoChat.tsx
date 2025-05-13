@@ -28,7 +28,7 @@ import {
     createRoomWithUser
 } from '../lib/roomService';
 import { reportUser } from '../lib/reportService';
-import { CircularProgress } from '@mui/material';
+import LoadingSpinner from './LoadingSpinner';
 
 interface VideoChatProps {
     user: User;
@@ -733,7 +733,7 @@ const VideoChat: React.FC<VideoChatProps> = ({ user }) => {
                         {chatState === ChatState.SEARCHING && (
                             <div className="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-80">
                                 <div className="text-center p-6">
-                                    <CircularProgress size={40} className="mb-4" />
+                                    <LoadingSpinner size={40} className="mx-auto mb-4" />
                                     <h3 className="text-2xl font-bold text-white mb-2">Finding a partner...</h3>
                                     <p className="text-gray-300 mb-6">Please wait while we connect you with someone.</p>
                                     <button
