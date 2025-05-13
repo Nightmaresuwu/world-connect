@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { createUserWithEmailAndPassword, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { auth } from '../lib/firebase';
 import { upsertUser, getUserByUsername } from '../lib/userService';
@@ -15,14 +16,15 @@ const Register: React.FC<RegisterProps> = ({ onRegister, onRegisterSuccess }) =>
     const [username, setUsername] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
+    const navigate = useNavigate();
 
     const handleRegistrationSuccess = (message: string) => {
         if (onRegisterSuccess) {
             onRegisterSuccess(message);
         }
-        if (onRegister) {
-            onRegister();
-        }
+
+        // Navigate to login page
+        navigate('/login');
     };
 
     const handleEmailAuth = async (e: React.FormEvent) => {
@@ -119,7 +121,7 @@ const Register: React.FC<RegisterProps> = ({ onRegister, onRegisterSuccess }) =>
     };
 
     return (
-        <div className="w-full max-w-md bg-gray-800 rounded-b-lg shadow-lg p-8">
+        <div className="w-full max-w-md bg-gray-800 rounded-lg shadow-lg p-8">
             <div>
                 <h2 className="text-center text-2xl font-bold text-blue-400 mb-4">
                     Create your user account
@@ -225,6 +227,15 @@ const Register: React.FC<RegisterProps> = ({ onRegister, onRegisterSuccess }) =>
                         {loading ? 'Connecting...' : 'Sign up with Google'}
                     </button>
                 </div>
+            </div>
+
+            <div className="mt-6 text-center">
+                <p className="text-gray-400">
+                    Already have an account?{' '}
+                    <Link to="/login" className="text-blue-400 hover:text-blue-300 font-medium">
+                        Sign in here
+                    </Link>
+                </p>
             </div>
         </div>
     );
