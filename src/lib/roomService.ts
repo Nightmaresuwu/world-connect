@@ -9,8 +9,7 @@ import {
     where,
     orderBy,
     Timestamp,
-    onSnapshot,
-    setDoc
+    onSnapshot
 } from "firebase/firestore";
 import { db } from "./firebase";
 import { UserData } from "./userService";

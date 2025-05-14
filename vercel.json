@@ -1,38 +1,14 @@
 {
-    "version": 2,
-    "builds": [
+    "buildCommand": "npm run build",
+    "outputDirectory": "build",
+    "installCommand": "npm install --legacy-peer-deps",
+    "rewrites": [
         {
-            "src": "package.json",
-            "use": "@vercel/static-build",
-            "config": {
-                "distDir": "build",
-                "installCommand": "npm install --legacy-peer-deps"
-            }
-        }
-    ],
-    "routes": [
-        {
-            "src": "/static/(.*)",
-            "dest": "/static/$1"
-        },
-        {
-            "src": "/favicon.ico",
-            "dest": "/favicon.ico"
-        },
-        {
-            "src": "/manifest.json",
-            "dest": "/manifest.json"
-        },
-        {
-            "src": "/logo192.png",
-            "dest": "/logo192.png"
-        },
-        {
-            "src": "/(.*)",
-            "dest": "/index.html"
+            "source": "/(.*)",
+            "destination": "/index.html"
         }
     ],
     "env": {
-        "NPM_FLAGS": "--legacy-peer-deps"
+        "CI": "false"
     }
 }

@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
-const { createCanvas, loadImage } = require('canvas');
 const sharp = require('sharp');
+const toIco = require('to-ico');
 
 // Ensure output directories exist
 const scriptDir = __dirname;
@@ -28,11 +28,17 @@ async function generateLogos() {
             .toFile(path.join(publicDir, 'logo512.png'));
         console.log('Generated logo512.png');
 
-        // Generate favicon.ico (actually PNG for simplicity)
+        // Generate favicon.png for ico conversion
         await sharp(Buffer.from(svgString))
             .resize(64, 64)
             .toFile(path.join(publicDir, 'favicon.png'));
         console.log('Generated favicon.png');
+
+        // Convert to favicon.ico
+        const pngBuffer = fs.readFileSync(path.join(publicDir, 'favicon.png'));
+        const icoBuffer = await toIco([pngBuffer]);
+        fs.writeFileSync(path.join(publicDir, 'favicon.ico'), icoBuffer);
+        console.log('Generated favicon.ico');
 
         console.log('Logo generation complete!');
     } catch (error) {

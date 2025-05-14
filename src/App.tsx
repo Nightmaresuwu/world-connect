@@ -9,15 +9,21 @@ import Register from './components/Register';
 import Profile from './components/Profile';
 import VideoChat from './components/VideoChat';
 import AdminDashboard from './components/AdminDashboard';
+import logo from './logo.svg';
+import LoadingSpinner from './components/LoadingSpinner';
 
 // Layout components
 const AuthLayout = ({ children }: { children: React.ReactNode }) => {
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-gray-900 text-white">
-      <div className="w-full max-w-md mb-6">
-        <h1 className="text-center text-4xl font-extrabold text-white mb-4">World Connect</h1>
+    <div className="flex flex-col items-center justify-center min-h-screen bg-primary-gradient text-white">
+      <div className="w-full max-w-md mb-6 flex flex-col items-center">
+        <img src={logo} alt="World Connect Logo" className="App-logo w-40 h-40 mb-4" />
+        <h1 className="text-center text-4xl font-extrabold text-white mb-2">World Connect</h1>
+        <p className="text-center text-lg text-blue-200 mb-8">Global Video Chat</p>
       </div>
-      {children}
+      <div className="w-full max-w-md bg-card rounded-xl shadow-2xl p-8">
+        {children}
+      </div>
     </div>
   );
 };
@@ -33,11 +39,12 @@ const MainLayout = ({ children, user, isAdmin, adminData }: {
   const currentPage = location.pathname.split('/')[1] || 'videoChat';
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white">
-      <nav className="bg-gray-800 px-6 py-4 shadow-md">
+    <div className="min-h-screen bg-gradient-to-b from-[#0f172a] to-[#1E293B] text-white">
+      <nav className="bg-[#1E3A8A] bg-opacity-80 backdrop-blur-lg px-6 py-4 shadow-lg border-b border-blue-900">
         <div className="container mx-auto flex justify-between items-center">
           <div className="flex items-center">
-            <h1 className="text-xl font-bold text-white">WorldConnect</h1>
+            <img src={logo} alt="World Connect Logo" className="h-10 w-10 mr-3" />
+            <h1 className="text-xl font-bold text-gradient">World Connect</h1>
             {isAdmin && (
               <span className="ml-2 bg-yellow-500 text-xs font-semibold text-black px-2 py-1 rounded-full">
                 {adminData?.role === 'superadmin' ? 'SUPER ADMIN' : 'ADMIN'}
@@ -48,13 +55,17 @@ const MainLayout = ({ children, user, isAdmin, adminData }: {
           <div className="flex items-center space-x-4">
             <button
               onClick={() => navigate('/videoChat')}
-              className={`px-4 py-2 rounded ${currentPage === 'videoChat' ? 'bg-blue-600' : 'bg-transparent hover:bg-gray-700'}`}
+              className={`px-4 py-2 rounded-lg transition-all duration-200 ${currentPage === 'videoChat'
+                ? 'bg-[#3B82F6] text-white shadow-md'
+                : 'bg-transparent hover:bg-blue-800 hover:bg-opacity-30'}`}
             >
               Video Chat
             </button>
             <button
               onClick={() => navigate('/profile')}
-              className={`px-4 py-2 rounded ${currentPage === 'profile' ? 'bg-blue-600' : 'bg-transparent hover:bg-gray-700'}`}
+              className={`px-4 py-2 rounded-lg transition-all duration-200 ${currentPage === 'profile'
+                ? 'bg-[#3B82F6] text-white shadow-md'
+                : 'bg-transparent hover:bg-blue-800 hover:bg-opacity-30'}`}
             >
               Profile
             </button>
@@ -62,14 +73,16 @@ const MainLayout = ({ children, user, isAdmin, adminData }: {
             {isAdmin && (
               <button
                 onClick={() => navigate('/admin')}
-                className={`px-4 py-2 rounded ${currentPage === 'admin' ? 'bg-blue-600' : 'bg-transparent hover:bg-gray-700'}`}
+                className={`px-4 py-2 rounded-lg transition-all duration-200 ${currentPage === 'admin'
+                  ? 'bg-[#3B82F6] text-white shadow-md'
+                  : 'bg-transparent hover:bg-blue-800 hover:bg-opacity-30'}`}
               >
                 Admin Dashboard
               </button>
             )}
             <button
               onClick={() => auth.signOut()}
-              className="px-4 py-2 bg-red-600 hover:bg-red-700 rounded"
+              className="px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg transition-all duration-200 shadow-md"
             >
               Logout
             </button>
@@ -77,7 +90,7 @@ const MainLayout = ({ children, user, isAdmin, adminData }: {
         </div>
       </nav>
 
-      <div className="container mx-auto mt-8 px-4">
+      <div className="container mx-auto mt-8 px-4 pb-12">
         {children}
       </div>
     </div>
@@ -100,8 +113,8 @@ const RequireAuth = ({ children }: { children: React.ReactNode }) => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-blue-500"></div>
+      <div className="min-h-screen bg-primary-gradient flex items-center justify-center">
+        <LoadingSpinner size={64} className="mx-auto" />
       </div>
     );
   }
@@ -168,10 +181,21 @@ const App: React.FC = () => {
     setRegistrationSuccess(message);
   };
 
+  // Clear registration message when navigating away from login page
+  useEffect(() => {
+    return () => {
+      if (registrationSuccess) {
+        setRegistrationSuccess('');
+      }
+    };
+  }, [registrationSuccess]);
+
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-blue-500"></div>
+      <div className="min-h-screen bg-primary-gradient flex flex-col items-center justify-center p-4">
+        <img src={logo} alt="World Connect Logo" className="App-logo w-40 h-40 mb-8" />
+        <LoadingSpinner size={48} className="mb-4" />
+        <p className="text-white text-lg">Loading World Connect...</p>
       </div>
     );
   }

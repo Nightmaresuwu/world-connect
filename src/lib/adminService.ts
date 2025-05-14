@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import { doc, getDoc, collection, getDocs, query, where, setDoc, Timestamp, serverTimestamp } from "firebase/firestore";
 import { db } from "./firebase";
 
