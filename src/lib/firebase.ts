@@ -9,13 +9,13 @@ import { getFirestore } from "firebase/firestore";
 // Your web app's Firebase configuration
 // For Firebase JS SDK v7.20.0 and later, measurementId is optional
 const firebaseConfig = {
-    apiKey: process.env.REACT_APP_FIREBASE_API_KEY || "AIzaSyDfUJZtu6YZp-PNSBLFqPOueg3sGluZcn0",
-    authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN || "world-connect-cc515.firebaseapp.com",
-    projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID || "world-connect-cc515",
-    storageBucket: process.env.REACT_APP_FIREBASE_STORAGE_BUCKET || "world-connect-cc515.firebasestorage.app",
-    messagingSenderId: process.env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID || "118610644476",
+    apiKey: process.env.REACT_APP_FIREBASE_API_KEY || "AIzaSyCKG3qQ0U2rNKQoBgHQoYlNQXLyMnageY8",
+    authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN || "test2-d3d4a.firebaseapp.com",
+    projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID || "test2-d3d4a",
+    storageBucket: process.env.REACT_APP_FIREBASE_STORAGE_BUCKET || "test2-d3d4a.firebasestorage.app",
+    messagingSenderId: process.env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID || "259316975745",
     appId: process.env.REACT_APP_FIREBASE_APP_ID || "1:118610644476:web:74081068bfe0694c327679",
-    measurementId: process.env.REACT_APP_FIREBASE_MEASUREMENT_ID || "G-YRBFW9XVMK"
+    measurementId: process.env.REACT_APP_FIREBASE_MEASUREMENT_ID || "G-2Q0EKD0DS3"
 };
 
 // Initialize Firebase
