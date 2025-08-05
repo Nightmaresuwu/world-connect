@@ -14,7 +14,7 @@ const firebaseConfig = {
     projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID || "test2-d3d4a",
     storageBucket: process.env.REACT_APP_FIREBASE_STORAGE_BUCKET || "test2-d3d4a.firebasestorage.app",
     messagingSenderId: process.env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID || "259316975745",
-    appId: process.env.REACT_APP_FIREBASE_APP_ID || "1:118610644476:web:74081068bfe0694c327679",
+    appId: process.env.REACT_APP_FIREBASE_APP_ID || "1:259316975745:web:934ec74e3b658176f16580",
     measurementId: process.env.REACT_APP_FIREBASE_MEASUREMENT_ID || "G-2Q0EKD0DS3"
 };
 
